@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.PorterDuff
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -28,6 +29,8 @@ import com.blanke.mdwechat.ViewTreeRepoThisVersion as VTTV
 object ListViewHooker : HookerProvider {
     private var wechatId: CharSequence = ""
     private val excludeContext = arrayOf("com.tencent.mm.plugin.mall.ui.MallIndexUI")
+    private const val keyBackgroundCloned = "mdwechat_background_cloned"
+    private const val keyForegroundCloned = "mdwechat_foreground_cloned"
 
     private val titleTextColor: Int
         get() {
@@ -37,6 +40,9 @@ object ListViewHooker : HookerProvider {
         get() {
             return NightModeUtils.getContentTextColor()
         }
+
+    private val shouldPreserveWeChatItemBackground: Boolean
+        get() = WechatGlobal.wxVersion!! >= Version("8.0.49")
 
     private val isHookTextColor: Boolean
         get() {
@@ -48,6 +54,65 @@ object ListViewHooker : HookerProvider {
     }
 
     private fun newTransparentDrawable(): Drawable = ColorDrawable(Color.TRANSPARENT)
+
+    fun prepareReusableItemView(view: View) {
+        if (WechatGlobal.wxVersion!! < Version("8.0.49")) {
+            return
+        }
+        cloneStatefulBackgroundIfNeeded(view)
+        cloneStatefulForegroundIfNeeded(view)
+        clearInteractiveState(view)
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                prepareReusableItemView(view.getChildAt(i))
+            }
+        }
+    }
+
+    private fun cloneStatefulBackgroundIfNeeded(view: View) {
+        val background = view.background ?: return
+        if (!background.isStateful || XposedHelpers.getAdditionalInstanceField(view, keyBackgroundCloned) != null) {
+            return
+        }
+        val newBackground = background.constantState?.newDrawable(view.resources)?.mutate() ?: background.mutate()
+        if (newBackground !== background) {
+            view.background = newBackground
+        }
+        XposedHelpers.setAdditionalInstanceField(view, keyBackgroundCloned, true)
+    }
+
+    private fun cloneStatefulForegroundIfNeeded(view: View) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return
+        }
+        val foreground = view.foreground ?: return
+        if (!foreground.isStateful || XposedHelpers.getAdditionalInstanceField(view, keyForegroundCloned) != null) {
+            return
+        }
+        val newForeground = foreground.constantState?.newDrawable(view.resources)?.mutate() ?: foreground.mutate()
+        if (newForeground !== foreground) {
+            view.foreground = newForeground
+        }
+        XposedHelpers.setAdditionalInstanceField(view, keyForegroundCloned, true)
+    }
+
+    private fun clearInteractiveState(view: View) {
+        view.isPressed = false
+        view.isSelected = false
+        view.isActivated = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+            view.jumpDrawablesToCurrentState()
+        }
+        view.cancelLongPress()
+        view.clearFocus()
+        view.background?.state = intArrayOf()
+        view.background?.jumpToCurrentState()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            view.foreground?.state = intArrayOf()
+            view.foreground?.jumpToCurrentState()
+        }
+        view.refreshDrawableState()
+    }
 
     private val listViewHook = Hooker {
         XposedHelpers.findAndHookMethod(AbsListView::class.java, "setSelector", Drawable::class.java, object : XC_MethodHook() {
@@ -804,9 +869,11 @@ object ListViewHooker : HookerProvider {
                         unreadCountView.backgroundTintList = ColorStateList.valueOf(NightModeUtils.colorTip)
                         unreadCountView.setTextColor(HookConfig.get_color_tip_num)
                         unreadView.backgroundTintList = ColorStateList.valueOf(NightModeUtils.colorTip)
-                        // 下划线
-                        ViewUtils.getChildView1(view, VTTV.ConversationListViewItem.treeStacks["contentView"])?.apply {
-                            this.background = createItemRippleDrawable()
+                        // 8.0.49 起这里已经是整块内容容器，继续强行替换背景会留下整片高亮色块。
+                        if (!shouldPreserveWeChatItemBackground) {
+                            ViewUtils.getChildView1(view, VTTV.ConversationListViewItem.treeStacks["contentView"])?.apply {
+                                this.background = createItemRippleDrawable()
+                            }
                         }
                     }
                     //其他项, 背景置透明
@@ -993,6 +1060,7 @@ object ListViewHooker : HookerProvider {
                             LogUtil.log("--------------------")
                         }
                     }
+                    prepareReusableItemView(view)
                 } catch (e: Exception) {
                     LogUtil.log(e)
                 }
@@ -1058,10 +1126,12 @@ object ListViewHooker : HookerProvider {
                             headTextView.setTextColor(titleTextColor)
                         }
                         //  titleView
-                        ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["titleView"])
-                                ?.background = createItemRippleDrawable()
-                        ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["borderLineBottom"])
-                                ?.background = createItemRippleDrawable()
+                        if (!shouldPreserveWeChatItemBackground) {
+                            ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["titleView"])
+                                    ?.background = createItemRippleDrawable()
+                            ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["borderLineBottom"])
+                                    ?.background = createItemRippleDrawable()
+                        }
                         //endregion
 
 
@@ -1074,8 +1144,10 @@ object ListViewHooker : HookerProvider {
                     if (ViewTreeUtils.equals(VTTV.ContactMyWorkItem.item, contactContentsItem!!)) {
                         LogUtil.logOnlyOnce("ListViewHooker.ContactMyWorkItem")
                         //  titleView
-                        ViewUtils.getChildView1(contactContentsItem!!, VTTV.ContactMyWorkItem.treeStacks["titleView"])
-                                ?.background = createItemRippleDrawable()
+                        if (!shouldPreserveWeChatItemBackground) {
+                            ViewUtils.getChildView1(contactContentsItem!!, VTTV.ContactMyWorkItem.treeStacks["titleView"])
+                                    ?.background = createItemRippleDrawable()
+                        }
                         ViewUtils.getChildView1(contactContentsItem!!, VTTV.ContactMyWorkItem.treeStacks["borderLineBottom"])
                                 ?.background = drawableTransparent
                         if (isHookTextColor) {
@@ -1099,7 +1171,9 @@ object ListViewHooker : HookerProvider {
             var headTextView: View?
             if (itemContent != null) {
                 // 新的朋友 等几个 item
-                itemContent.background = createItemRippleDrawable()
+                if (!shouldPreserveWeChatItemBackground) {
+                    itemContent.background = createItemRippleDrawable()
+                }
 //                                                LogUtil.log("-------------")
 //                                                LogUtil.logViewStackTraces(itemContent)
 //                                                LogUtil.log("-------------")
@@ -1113,7 +1187,9 @@ object ListViewHooker : HookerProvider {
                         for (m in 0 until lll.childCount) {
                             val comItem = (lll.getChildAt(m) as ViewGroup)
                             val ll = comItem.getChildAt(0) as ViewGroup
-                            ll.background = createItemRippleDrawable()
+                            if (!shouldPreserveWeChatItemBackground) {
+                                ll.background = createItemRippleDrawable()
+                            }
                             // 去掉分割线
                             ll.getChildAt(0).background = drawableTransparent
                             titleTextView = ViewUtils.getChildView(ll, 0, 1)

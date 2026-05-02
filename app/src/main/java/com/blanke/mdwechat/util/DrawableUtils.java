@@ -3,6 +3,7 @@ package com.blanke.mdwechat.util;
 import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.RippleDrawable;
@@ -39,7 +40,7 @@ public class DrawableUtils {
     }
 
     public static RippleDrawable getTransparentColorRippleDrawable(int normalColor, int pressedColor) {
-        return new RippleDrawable(ColorStateList.valueOf(pressedColor), null, getRippleMask(normalColor));
+        return new RippleDrawable(ColorStateList.valueOf(pressedColor), new ColorDrawable(Color.TRANSPARENT), getRippleMask(normalColor));
     }
 
     public static RippleDrawable getColorRippleDrawable(int normalColor, int pressedColor) {

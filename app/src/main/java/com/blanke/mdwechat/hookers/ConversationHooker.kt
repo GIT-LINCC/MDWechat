@@ -145,7 +145,9 @@ object ConversationHooker : HookerProvider {
                             view.getChildAt(0).viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
                                 override fun onGlobalLayout() {
                                     val child = view.getChildAt(0)
-                                    child.background = createItemRippleDrawable()
+                                    if (WechatGlobal.wxVersion!! < Version("8.0.49")) {
+                                        child.background = createItemRippleDrawable()
+                                    }
                                     child.viewTreeObserver.removeOnGlobalLayoutListener(this)
                                 }
                             })

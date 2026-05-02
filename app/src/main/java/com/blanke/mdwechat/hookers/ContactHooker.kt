@@ -128,6 +128,7 @@ object ContactHooker : HookerProvider {
                     if (view !is ViewGroup) {
                         return
                     }
+                    ListViewHooker.prepareReusableItemView(view)
                     // 联系人列表
                     if (ViewTreeUtils.equals(VTTV.ContactListViewItem.item, view)) {
                         ListViewHooker.setContactListViewItem(view)

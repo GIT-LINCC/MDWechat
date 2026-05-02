@@ -32,7 +32,8 @@ object WeChatHelper {
     val colorDarkPrimary: Int = Color.parseColor("#333333")
 
 
-    val drawableTransparent: ColorDrawable = ColorDrawable(Color.TRANSPARENT)
+    val drawableTransparent: ColorDrawable
+        get() = ColorDrawable(Color.TRANSPARENT)
 
     val drawableWhite: ColorDrawable = ColorDrawable(colorWhite)
 
