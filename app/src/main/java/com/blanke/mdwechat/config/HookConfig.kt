@@ -193,8 +193,8 @@ object HookConfig {
 
     val get_hook_conversation_background_alpha: Int
         get() {
-            val alpha = WeChatHelper.XMOD_PREFS.getString(key_hook_conversation_background_alpha, "120")
-            return Math.min(255, Math.max(alpha!!.toInt(), 0))
+            val alpha = WeChatHelper.XMOD_PREFS.getString(key_hook_conversation_background_alpha, "0")?.toIntOrNull() ?: 0
+            return Math.min(255, Math.max(alpha, 0))
         }
     val is_hook_actionbar_color: Boolean
         get() {

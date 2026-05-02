@@ -11,7 +11,9 @@ import com.blanke.mdwechat.Classes.ConversationWithAppBrandListView
 import com.blanke.mdwechat.Fields.ConversationFragment_mListView
 import com.blanke.mdwechat.Methods.ConversationWithAppBrandListView_isAppBrandHeaderEnable
 import com.blanke.mdwechat.Version
-import com.blanke.mdwechat.WeChatHelper.defaultImageRippleDrawable
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import com.blanke.mdwechat.WeChatHelper.createItemRippleDrawable
 import com.blanke.mdwechat.WechatGlobal
 import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.hookers.base.Hooker
@@ -79,6 +81,9 @@ object ConversationHooker : HookerProvider {
         if (WechatGlobal.wxVersion!! >= Version("7.0.4")) {
             XposedBridge.hookAllMethods(CC.View, "setBackground", object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (WechatGlobal.wxVersion!! >= Version("8.0.49")) {
+                        return
+                    }
                     val view = param.thisObject as View
                     val pView = view.parent
                     if ((pView is View) && (pView::class.java.name == ConversationListView.name)) {
@@ -139,12 +144,9 @@ object ConversationHooker : HookerProvider {
                             LogUtil.logOnlyOnce("addHeaderView")
                             view.getChildAt(0).viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
                                 override fun onGlobalLayout() {
-                                    val oldBackground = view.getChildAt(0).background
-                                    if (oldBackground == defaultImageRippleDrawable) {
-                                        view.getChildAt(0).viewTreeObserver.removeOnGlobalLayoutListener(this)
-                                    } else {
-                                        view.getChildAt(0).background = defaultImageRippleDrawable
-                                    }
+                                    val child = view.getChildAt(0)
+                                    child.background = createItemRippleDrawable()
+                                    child.viewTreeObserver.removeOnGlobalLayoutListener(this)
                                 }
                             })
                             LogUtil.logOnlyOnce("addHeaderView Done")

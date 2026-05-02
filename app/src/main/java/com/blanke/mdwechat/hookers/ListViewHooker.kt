@@ -9,7 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import com.blanke.mdwechat.*
-import com.blanke.mdwechat.WeChatHelper.defaultImageRippleDrawable
+import com.blanke.mdwechat.WeChatHelper.createItemRippleDrawable
 import com.blanke.mdwechat.WeChatHelper.drawableTransparent
 import com.blanke.mdwechat.config.AppCustomConfig
 import com.blanke.mdwechat.config.HookConfig
@@ -47,10 +47,12 @@ object ListViewHooker : HookerProvider {
         return listOf(listViewHook)
     }
 
+    private fun newTransparentDrawable(): Drawable = ColorDrawable(Color.TRANSPARENT)
+
     private val listViewHook = Hooker {
         XposedHelpers.findAndHookMethod(AbsListView::class.java, "setSelector", Drawable::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam?) {
-                param?.args!![0] = drawableTransparent
+                param?.args!![0] = newTransparentDrawable()
             }
         })
         XposedHelpers.findAndHookMethod(AbsListView::class.java, "obtainView", CC.Int, BooleanArray::class.java, object : XC_MethodHook() {
@@ -779,7 +781,13 @@ object ListViewHooker : HookerProvider {
                     else if (ViewTreeUtils.equals(VTTV.ConversationListViewItem.item, view)) {
                         LogUtil.logOnlyOnce("ListViewHooker.ConversationListViewItem")
                         try {
-                            view.background.alpha = HookConfig.get_hook_conversation_background_alpha
+                            val backgroundAlpha = HookConfig.get_hook_conversation_background_alpha
+                            if (backgroundAlpha > 0) {
+                                view.background?.constantState?.newDrawable()?.mutate()?.apply {
+                                    alpha = backgroundAlpha
+                                    view.background = this
+                                }
+                            }
                         } catch (e: Exception) {
                         }
                         val chatNameView = ViewUtils.getChildView1(view, VTTV.ConversationListViewItem.treeStacks["chatNameView"])
@@ -798,13 +806,12 @@ object ListViewHooker : HookerProvider {
                         unreadView.backgroundTintList = ColorStateList.valueOf(NightModeUtils.colorTip)
                         // 下划线
                         ViewUtils.getChildView1(view, VTTV.ConversationListViewItem.treeStacks["contentView"])?.apply {
-                            this.background = defaultImageRippleDrawable
+                            this.background = createItemRippleDrawable()
                         }
                     }
                     //其他项, 背景置透明
                     // 联系人列表
                     else if (ViewTreeUtils.equals(VTTV.ContactListViewItem.item, view)) {
-                        view.background = drawableTransparent
                         setContactListViewItem(view)
                     }
                     // 联系人列表头部
@@ -1005,9 +1012,6 @@ object ListViewHooker : HookerProvider {
         ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["innerView"])
                 ?.background = drawableTransparent
 
-        ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["contentView"])
-                ?.background = drawableTransparent
-
         val titleView = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["titleView"])
         titleView?.background = drawableTransparent
         val titleView80 = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["titleView_8_0"])
@@ -1055,9 +1059,9 @@ object ListViewHooker : HookerProvider {
                         }
                         //  titleView
                         ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["titleView"])
-                                ?.background = defaultImageRippleDrawable
+                                ?.background = createItemRippleDrawable()
                         ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["borderLineBottom"])
-                                ?.background = defaultImageRippleDrawable
+                                ?.background = createItemRippleDrawable()
                         //endregion
 
 
@@ -1071,7 +1075,7 @@ object ListViewHooker : HookerProvider {
                         LogUtil.logOnlyOnce("ListViewHooker.ContactMyWorkItem")
                         //  titleView
                         ViewUtils.getChildView1(contactContentsItem!!, VTTV.ContactMyWorkItem.treeStacks["titleView"])
-                                ?.background = defaultImageRippleDrawable
+                                ?.background = createItemRippleDrawable()
                         ViewUtils.getChildView1(contactContentsItem!!, VTTV.ContactMyWorkItem.treeStacks["borderLineBottom"])
                                 ?.background = drawableTransparent
                         if (isHookTextColor) {
@@ -1095,7 +1099,7 @@ object ListViewHooker : HookerProvider {
             var headTextView: View?
             if (itemContent != null) {
                 // 新的朋友 等几个 item
-                itemContent.background = defaultImageRippleDrawable
+                itemContent.background = createItemRippleDrawable()
 //                                                LogUtil.log("-------------")
 //                                                LogUtil.logViewStackTraces(itemContent)
 //                                                LogUtil.log("-------------")
@@ -1109,7 +1113,7 @@ object ListViewHooker : HookerProvider {
                         for (m in 0 until lll.childCount) {
                             val comItem = (lll.getChildAt(m) as ViewGroup)
                             val ll = comItem.getChildAt(0) as ViewGroup
-                            ll.background = defaultImageRippleDrawable
+                            ll.background = createItemRippleDrawable()
                             // 去掉分割线
                             ll.getChildAt(0).background = drawableTransparent
                             titleTextView = ViewUtils.getChildView(ll, 0, 1)

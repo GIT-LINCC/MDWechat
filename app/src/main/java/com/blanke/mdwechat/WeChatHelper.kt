@@ -67,6 +67,19 @@ object WeChatHelper {
             return imageRippleDrawable
         }
 
+    fun createItemRippleDrawable(): Drawable {
+        if (!HookConfig.is_hook_ripple) {
+            return ColorDrawable(Color.TRANSPARENT)
+        }
+        val rippleColor = HookConfig.get_color_ripple
+        val resolvedRippleColor = if (Color.alpha(rippleColor) == 0xFF) {
+            Color.argb(0x33, Color.red(rippleColor), Color.green(rippleColor), Color.blue(rippleColor))
+        } else {
+            rippleColor
+        }
+        return DrawableUtils.getTransparentColorRippleDrawable(Color.WHITE, resolvedRippleColor).mutate()
+    }
+
     fun getLeftRedPacketBubble(
             resources: Resources,
             isTint: Boolean = false,
