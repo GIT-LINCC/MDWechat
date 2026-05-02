@@ -17,7 +17,9 @@ import com.blanke.mdwechat.util.ConvertUtils
 import com.blanke.mdwechat.util.DrawableUtils
 import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.LogUtil.log
+import com.blanke.mdwechat.util.ModuleContextCompat
 import com.blanke.mdwechat.util.NightModeUtils
+import com.blanke.mdwechat.util.RuntimeProbe
 import com.github.clans.fab.FloatingActionButton
 import com.github.clans.fab.FloatingActionButton.SIZE_MINI
 import com.github.clans.fab.FloatingActionMenu
@@ -27,29 +29,36 @@ import de.robv.android.xposed.XposedHelpers
 object FloatMenuHook {
 
     fun addFloatMenu(contentLayout: ViewGroup, bottomMargin: Int = 0) {
+        RuntimeProbe.append(contentLayout.context, "FloatMenu start bottomMargin=$bottomMargin")
         FloatingActionMenu.OPENED_PLUS_ROTATION_LEFT = HookConfig.value_hook_float_button_angle.toFloat()
-        val context = contentLayout.context.createPackageContext(Common.MY_APPLICATION_PACKAGE, Context.CONTEXT_IGNORE_SECURITY)
+        val context = ModuleContextCompat.wrap(contentLayout.context)
         val floatConfig = AppCustomConfig.getFloatButtonConfig()
         if (floatConfig?.items == null || floatConfig.menu?.icon == null) {
             log("floatButton 主 icon 为空")
+            RuntimeProbe.append(contentLayout.context, "FloatMenu configMissing")
             return
         }
         val primaryColor = NightModeUtils.colorPrimary
 //        val secondaryColor = HookConfig.get_color_secondary
         val floatButtonColor = NightModeUtils.colorFloatButton
         val actionMenu = FloatingActionMenu(context)
+        actionMenu.contentDescription = "MDWECHAT_FLOAT_MENU_OK"
+        actionMenu.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         actionMenu.menuButtonColorNormal = primaryColor
         actionMenu.menuButtonColorPressed = primaryColor
         actionMenu.setmLabelsTextColor(floatButtonColor)
         val bitmap: Bitmap? = AppCustomConfig.getIcon(floatConfig.menu!!.icon)
         if (bitmap == null) {
             log("floatButton 主 icon 为空")
+            RuntimeProbe.append(contentLayout.context, "FloatMenu iconMissing ${floatConfig.menu!!.icon}")
             return
         }
         var drawable: Drawable = BitmapDrawable(context.resources, bitmap)
         drawable = if (HookConfig.is_hook_float_button_color_up) DrawableUtils.setDrawableColor(drawable, floatButtonColor) else drawable
         actionMenu.setMenuIcon(drawable)
         actionMenu.initMenuButton()
+        actionMenu.menuButton.contentDescription = "MDWECHAT_FLOAT_MENU_BUTTON"
+        actionMenu.menuButton.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
 
         //menu items
         val floatItems = arrayListOf<FLoatButtonConfigItem>()
@@ -120,6 +129,7 @@ object FloatMenuHook {
         }
         contentLayout.addView(backgroundView, params2)
         contentLayout.addView(actionMenu, params)
+        RuntimeProbe.append(contentLayout.context, "FloatMenu addViewDone items=${floatItems.size}")
     }
 
     private fun getFloatButton(actionMenu: FloatingActionMenu, context: Context,

@@ -150,7 +150,12 @@ object WeChatHelper {
     }
 
     fun initPrefs() {
-        XMOD_PREFS = XSharedPreferences(File(AppCustomConfig.getConfigFile(Common.MOD_PREFS + ".xml")))
+        val packagePrefs = XSharedPreferences(Common.MY_APPLICATION_PACKAGE, Common.MOD_PREFS)
+        XMOD_PREFS = if (packagePrefs.file?.canRead() == true) {
+            packagePrefs
+        } else {
+            XSharedPreferences(File(AppCustomConfig.getConfigFile(Common.MOD_PREFS + ".xml")))
+        }
         XMOD_PREFS.makeWorldReadable()
         XMOD_PREFS.reload()
     }

@@ -3,6 +3,7 @@ package com.blanke.mdwechat.settings
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.ComponentName
+import android.content.Context
 import android.content.Context.WINDOW_SERVICE
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -81,7 +82,7 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         takePhoto!!.onCreate(savedInstanceState)
         super.onCreate(savedInstanceState)
         EventBus.getDefault().register(this)
-//        preferenceManager.setSharedPreferencesMode(Context.MODE_WORLD_READABLE)
+        preferenceManager.sharedPreferencesMode = Context.MODE_WORLD_READABLE
         preferenceManager.sharedPreferencesName = Common.MOD_PREFS
         addPreferencesFromResource(R.xml.pref_settings)
         setLayout(preferenceScreen)

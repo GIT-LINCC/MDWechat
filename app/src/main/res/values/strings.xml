@@ -393,7 +393,7 @@
     <string name="sum_reset">如果你改坏了/不生效，可以选择重置设置</string>
     <string name="text_reset">重置后不可恢复，如有自定义内容建议先做备份</string>
     <string name="test">试验</string>
-    <string name="latest_wechat_version">8.0.32</string>
+    <string name="latest_wechat_version">8.0.49</string>
     <string name="app_name_version">version 4.2.6</string>
     <string name="key_joshcai_info">key_joshcai_info</string>
     <string name="josh_cai_info_outdated">检测到不兼容的微信版本（当前版本%s，最高适配%s)</string>

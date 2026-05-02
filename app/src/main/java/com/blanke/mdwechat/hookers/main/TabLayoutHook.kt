@@ -16,6 +16,8 @@ import com.blanke.mdwechat.config.AppCustomConfig
 import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.hookers.StatusBarHooker
 import com.blanke.mdwechat.util.*
+import com.blanke.mdwechat.util.ModuleContextCompat
+import com.blanke.mdwechat.util.RuntimeProbe
 import com.flyco.tablayout.CommonTabLayout
 import com.flyco.tablayout.listener.CustomTabEntity
 import com.flyco.tablayout.listener.OnTabSelectListener
@@ -28,9 +30,11 @@ object TabLayoutHook {
         val secondaryColor: Int = NightModeUtils.colorSecondary
         val getColorTertiary: Int = NightModeUtils.colorTeritary
         val tipColor: Int = HookConfig.get_color_tip_in_guide
-        val context = viewGroup.context.createPackageContext(Common.MY_APPLICATION_PACKAGE, Context.CONTEXT_IGNORE_SECURITY)
+        val context = ModuleContextCompat.wrap(viewGroup.context)
         val resContext = viewGroup.context
         val tabLayout = CommonTabLayout(context)
+        tabLayout.contentDescription = "MDWECHAT_TAB_OK"
+        tabLayout.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         tabLayout.textSelectColor = Color.WHITE
         val indicatorWeight = if (HookConfig.is_small_tab_bar_size) 0.5f else 1f
         val dp2 = ConvertUtils.dp2px(resContext, indicatorWeight)
@@ -82,6 +86,7 @@ object TabLayoutHook {
 
 
     fun addTabLayoutAtBottom(tabView: ViewGroup, height: Int) {
+        RuntimeProbe.append(tabView.context, "TabLayout bottom start height=$height")
         val tabLayout = newTabLayout(tabView, Gravity.TOP, 5f)
 
         val params = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -99,14 +104,16 @@ object TabLayoutHook {
             for (index in 0..3) {
                 viewChild.getChildAt(index).visibility = View.GONE
             }
+            RuntimeProbe.append(tabView.context, "TabLayout bottom addViewDone")
         } catch (e: Exception) {
             LogUtil.log(e)
+            RuntimeProbe.append(tabView.context, "TabLayout bottom failed ${e.javaClass.name}:${e.message}")
         }
     }
 
     //    小程序下拉之后需要填空
     fun addTabLayout(viewPagerLinearLayout: ViewGroup) {
-        val context = viewPagerLinearLayout.context.createPackageContext(Common.MY_APPLICATION_PACKAGE, Context.CONTEXT_IGNORE_SECURITY)
+        val context = ModuleContextCompat.wrap(viewPagerLinearLayout.context)
         val resContext = viewPagerLinearLayout.context
         // 7.0.7(?) 之后小程序下拉相关
 //        val isHideElevation = (WechatGlobal.wxVersion!! >= Version("7.0.7")) && (HookConfig.is_hook_hide_tab)

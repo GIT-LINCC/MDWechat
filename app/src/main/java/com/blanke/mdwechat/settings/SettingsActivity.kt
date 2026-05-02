@@ -49,6 +49,7 @@ class SettingsActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
         Common.APP_DIR_PATH
+        touchSharedPreferencesForLSPosed()
         verifyStoragePermissions(this)
         fab = findViewById(R.id.fab)
         fab.setOnClickListener {
@@ -57,6 +58,15 @@ class SettingsActivity : Activity() {
             goToWechatSettingPage()
         }
         GetNewestVersion(this, getVersionCode())
+    }
+
+    private fun touchSharedPreferencesForLSPosed() {
+        try {
+            val pref = getSharedPreferences(Common.MOD_PREFS, Context.MODE_WORLD_READABLE)
+            val hookSwitch = pref.getBoolean("hookSwitch", true)
+            pref.edit().putBoolean("hookSwitch", hookSwitch).apply()
+        } catch (ignored: SecurityException) {
+        }
     }
 
     fun GetNewestVersion(context: Activity, versionCode: Int) {

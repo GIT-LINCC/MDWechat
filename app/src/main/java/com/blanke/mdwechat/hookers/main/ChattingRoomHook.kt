@@ -11,6 +11,7 @@ import com.blanke.mdwechat.Common
 import com.blanke.mdwechat.config.AppCustomConfig.getChatBg
 import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.util.LogUtil
+import com.blanke.mdwechat.util.ModuleContextCompat
 import com.blanke.mdwechat.util.NightModeUtils
 import com.blanke.mdwechat.util.ViewTreeUtils
 import com.blanke.mdwechat.util.ViewUtils
@@ -107,7 +108,7 @@ object ChattingRoomHook {
             if (HookConfig.is_chat_bg_transparent_mode) {
                 if (HookConfig.is_enable_bg_chat) {
                     // region 自定义聊天背景
-                    val context = bgGroup.context.createPackageContext(Common.MY_APPLICATION_PACKAGE, Context.CONTEXT_IGNORE_SECURITY)
+                    val context = ModuleContextCompat.wrap(bgGroup.context)
                     val params = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                     params.height = HookConfig.value_resolution[1] - actionBarBottom
                     val bgViewWithEditText = FrameLayout(context)
@@ -132,7 +133,7 @@ object ChattingRoomHook {
             } else {
                 if (HookConfig.is_enable_bg_chat) {
                     //  region自定义聊天背景
-                    val context = bgGroup.context.createPackageContext(Common.MY_APPLICATION_PACKAGE, Context.CONTEXT_IGNORE_SECURITY)
+                    val context = ModuleContextCompat.wrap(bgGroup.context)
                     val params = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                     val view = FrameLayout(context)
                     params.height = HookConfig.value_resolution[1] - actionBarBottom

@@ -454,7 +454,7 @@ object BackgroundImageHook {
                             val paramsAddedOnTop = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                             paramsAddedOnTop.topMargin = _contactPageWhiteBar[0]
                             paramsAddedOnTop.height = _contactPageWhiteBar[1]
-                            Objects.Main.contactPageFix = FrameLayout(this.context.createPackageContext(Common.MY_APPLICATION_PACKAGE, Context.CONTEXT_IGNORE_SECURITY))
+                            Objects.Main.contactPageFix = FrameLayout(ModuleContextCompat.wrap(this.context))
                             setContactPageFixBackground(this, 1)
 //                        Objects.Main.contactPageFix!!.background = NightModeUtils.getBackgroundDrawable(cutBitmap("联系人界面高度补正", bg, _contactPageWhiteBar[0], _contactPageWhiteBar[1]))
                             this.addView(Objects.Main.contactPageFix!!, 1, paramsAddedOnTop)

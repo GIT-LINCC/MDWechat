@@ -250,14 +250,36 @@ object Classes {
 
     val ActionMenuView: Class<*>?
         get() {
+            try {
+                ReflectionUtil.findClassIfExists("android.support.v7.widget.ActionMenuView", WechatGlobal.wxLoader)?.let {
+                    return it
+                }
+            } catch (_: Throwable) {
+            }
+            try {
+                ReflectionUtil.findClassIfExists("androidx.appcompat.widget.ActionMenuView", WechatGlobal.wxLoader)?.let {
+                    return it
+                }
+            } catch (_: Throwable) {
+            }
+
             var clazzes = ReflectionUtil.findClassesFromPackage(WechatGlobal.wxLoader, WechatGlobal.wxClasses, "android.support.v7.view.menu")
             //wx8.0.3
             if (clazzes.classes.size == 0) {
                 clazzes = ReflectionUtil.findClassesFromPackage(WechatGlobal.wxLoader, WechatGlobal.wxClasses, "androidx.appcompat.view.menu")
             }
-            return clazzes
-                    .filterByField(CharSequence::class.java.name)
-                    .filterByField(Drawable::class.java.name)
+            if (clazzes.classes.size > 0) {
+                clazzes
+                        .filterByField(CharSequence::class.java.name)
+                        .filterByField(Drawable::class.java.name)
+                        .filterByMethod(MenuItem::class.java, "add", CharSequence::class.java)
+                        .filterByMethod(MenuItem::class.java, "add", Int::class.java, Int::class.java, Int::class.java, Int::class.java)
+                        .filterByMethod(SubMenu::class.java, "addSubMenu", CharSequence::class.java)
+                        .firstOrNull()
+                        ?.let { return it }
+            }
+
+            return ReflectionUtil.findClassesFromPackage(WechatGlobal.wxLoader, WechatGlobal.wxClasses, "androidx.appcompat.widget")
                     .filterByMethod(MenuItem::class.java, "add", CharSequence::class.java)
                     .filterByMethod(MenuItem::class.java, "add", Int::class.java, Int::class.java, Int::class.java, Int::class.java)
                     .filterByMethod(SubMenu::class.java, "addSubMenu", CharSequence::class.java)

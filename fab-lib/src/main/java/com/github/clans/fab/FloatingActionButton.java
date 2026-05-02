@@ -31,6 +31,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.animation.AlphaAnimation;
 import android.view.animation.Animation;
 import android.view.animation.AnimationUtils;
 import android.widget.ImageButton;
@@ -167,17 +168,26 @@ public class FloatingActionButton extends ImageButton {
 
     private void initShowAnimation(TypedArray attr) {
         int resourceId = attr.getResourceId(R.styleable.FloatingActionButton_fab_showAnimation, R.anim.fab_scale_up);
-        mShowAnimation = AnimationUtils.loadAnimation(getContext(), resourceId);
+        mShowAnimation = safeLoadAnimation(resourceId);
     }
 
     private void initHideAnimation(TypedArray attr) {
         int resourceId = attr.getResourceId(R.styleable.FloatingActionButton_fab_hideAnimation, R.anim.fab_scale_down);
-        mHideAnimation = AnimationUtils.loadAnimation(getContext(), resourceId);
+        mHideAnimation = safeLoadAnimation(resourceId);
+    }
+
+    private Animation safeLoadAnimation(int resourceId) {
+        try {
+            return AnimationUtils.loadAnimation(getContext(), resourceId);
+        } catch (Throwable ignored) {
+            Animation animation = new AlphaAnimation(1f, 1f);
+            animation.setDuration(0);
+            return animation;
+        }
     }
 
     private int getCircleSize() {
-        return getResources().getDimensionPixelSize(mFabSize == SIZE_NORMAL
-                ? R.dimen.fab_size_normal : R.dimen.fab_size_mini);
+        return Util.dpToPx(getContext(), mFabSize == SIZE_NORMAL ? 56f : 45f);
     }
 
     private int calculateMeasuredWidth() {

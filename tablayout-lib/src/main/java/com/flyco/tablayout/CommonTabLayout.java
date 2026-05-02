@@ -256,16 +256,7 @@ public class CommonTabLayout extends FrameLayout implements ValueAnimator.Animat
             msgView.setBackgroundColor(unreadBackground);
             msgView.setTextSize(11F);
             msgView.setVisibility(GONE);
-//            msgView.setPadding(3, 3, 3, 3);
-            if (mIconGravity == Gravity.LEFT) {
-                tabView = (ViewGroup) View.inflate(mContext, R.layout.layout_tab_left, null);
-            } else if (mIconGravity == Gravity.RIGHT) {
-                tabView = (ViewGroup) View.inflate(mContext, R.layout.layout_tab_right, null);
-            } else if (mIconGravity == Gravity.BOTTOM) {
-                tabView = (ViewGroup) View.inflate(mContext, R.layout.layout_tab_bottom, null);
-            } else {
-                tabView = (ViewGroup) View.inflate(mContext, R.layout.layout_tab_top, null);
-            }
+            tabView = createTabView();
             View topView = tabView.findViewById(R.id.ll_tap);
             RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             params.addRule(RelativeLayout.ALIGN_RIGHT, topView.getId());
@@ -276,6 +267,43 @@ public class CommonTabLayout extends FrameLayout implements ValueAnimator.Animat
         }
 
         updateTabStyles();
+    }
+
+    private ViewGroup createTabView() {
+        RelativeLayout root = new RelativeLayout(mContext);
+        root.setLayoutParams(new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        root.setClipChildren(false);
+        root.setClipToPadding(false);
+
+        LinearLayout container = new LinearLayout(mContext);
+        container.setId(R.id.ll_tap);
+        container.setGravity(Gravity.CENTER);
+        container.setOrientation(mIconGravity == Gravity.LEFT || mIconGravity == Gravity.RIGHT
+                ? LinearLayout.HORIZONTAL
+                : LinearLayout.VERTICAL);
+
+        RelativeLayout.LayoutParams containerParams = new RelativeLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        containerParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+        root.addView(container, containerParams);
+
+        TextView titleView = new TextView(mContext);
+        titleView.setId(R.id.tv_tab_title);
+        titleView.setSingleLine(true);
+
+        ImageView iconView = new ImageView(mContext);
+        iconView.setId(R.id.iv_tab_icon);
+
+        if (mIconGravity == Gravity.RIGHT || mIconGravity == Gravity.BOTTOM) {
+            container.addView(titleView);
+            container.addView(iconView);
+        } else {
+            container.addView(iconView);
+            container.addView(titleView);
+        }
+
+        return root;
     }
 
     /**

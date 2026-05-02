@@ -1,5 +1,10 @@
 [
   {
+    "name": "8.0.49.config",
+    "desc": "8.0.49 国内版",
+    "url": "https://gitee.com/JoshCai/MDWechat/raw/v4.0/data/config/wechat/8.0.49/8.0.49.config"
+  },
+  {
     "name": "8.0.32.config",
     "desc": "8.0.32 国内版",
     "url": "https://gitee.com/JoshCai/MDWechat/raw/v4.0/data/config/wechat/8.0.32/8.0.32.config"

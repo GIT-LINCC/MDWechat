@@ -28,10 +28,15 @@ import com.blanke.mdwechat.hookers.main.FloatMenuHook
 import com.blanke.mdwechat.hookers.main.HomeActionBarHook
 import com.blanke.mdwechat.hookers.main.TabLayoutHook
 import com.blanke.mdwechat.util.LogUtil
+import com.blanke.mdwechat.util.RuntimeProbe
 import com.blanke.mdwechat.util.ViewUtils
 import com.blanke.mdwechat.util.ViewUtils.measureHeight
 import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import java.lang.reflect.Field
+import java.util.Collections
+import java.util.IdentityHashMap
 
 
 object LauncherUIHooker : HookerProvider {
@@ -76,159 +81,225 @@ object LauncherUIHooker : HookerProvider {
 
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val activity = param.thisObject as? Activity ?: return
-                        LogUtil.log("activity resume = $activity")
-
-                        if (activity::class.java.classLoader != WechatGlobal.wxLoader) {
-                            LogUtil.toast("加载错误，请打开 MDWechat 主界面的 [play 开关] (详情请查看日志)。", true)
-//                            LogUtil.log("============")
-                            LogUtil.log("微信使用的classloader = ${activity::class.java.classLoader}")
-                            LogUtil.log("MDWechat使用的classloader = ${WechatGlobal.wxLoader}")
-                            LogUtil.log("\n\n==============================================================================")
-                            LogUtil.log("\n  ClassLoader加载错误，请打开 MDWechat 主界面的 [play 开关] (如已打开请忽略)。\n")
-                            LogUtil.log("==============================================================================\n\n")
-//                            LogUtil.log("============")
-                            WechatGlobal.wxLoader = activity::class.java.classLoader
-                            Classes.setLauncherUI()
-                        }
-                        WechatGlobal.preloaded = true
-//                        //等待其他hookers加载
-//                        while(!WechatGlobal.hookersLoaded){
-//                            sleep(100)
-//                        }
-
-                        if (activity::class.java != Classes.LauncherUI) {
-                            return
-                        }
-                        WeChatHelper.reloadPrefs()
-                        val isInit = XposedHelpers.getAdditionalInstanceField(activity, keyInit)
-                        if (isInit != null) {
-                            LogUtil.log("LauncherUI 已经hook过")
-                            return
-                        }
-                        LogUtil.log("LauncherUI onResume(), start hook")
-                        initHookLauncherUI(activity)
-                    }
-
-                    private fun initHookLauncherUI(activity: Activity) {
-                        try {
-                            val density = activity.resources.displayMetrics.density
-                            AppCustomConfig.bitmapScale = density / 3F
-
-                            Objects.Main.LauncherUI = activity
-                            val homeUI = LauncherUI_mHomeUI.get(activity)
-                            val mainTabUI = HomeUI_mMainTabUI.get(homeUI)
-                            val viewPager = MainTabUI_mCustomViewPager.get(mainTabUI)
-                            if (viewPager == null || viewPager !is View) {
-                                LogUtil.log("MainTabUI_mCustomViewPager == null return;")
-                                return
-                            }
-
-                            val linearViewGroup = viewPager.parent as ViewGroup
-                            BackgroundImageHook.contactPageParent = linearViewGroup
-                            val contentViewGroup = linearViewGroup.parent as ViewGroup
-                            Objects.Main.LauncherUI_mContentLayout = contentViewGroup
-
-//                            Objects.Main.HomeUI_mActionBar = Fields.HomeUI_mActionBar.get(homeUI)
-                            val mActionBar = Fields.HomeUI_mActionBar.get(homeUI)
-
-
-                            // mActionBar 内部嵌套了一个 ActionBar 类, 微信 8.0.32 把这个类的父类中获取 actionBar 高度的方法去掉了, 所以要去子类中找
-                            val mActionBarInField = mActionBar::class.java.declaredFields.filter {
-                                it.type.name == "androidx.appcompat.app.ActionBar"
-                            }.first()
-
-                            LogUtil.log("mActionBar = ${mActionBar}")
-                            LogUtil.log("mActionBarInFieldName = ${mActionBarInField.name}")
-                            val mActionBarIn = XposedHelpers.getObjectField(mActionBar, mActionBarInField.name)
-                            LogUtil.log("mActionBarIn = ${mActionBarIn}")
-
-
-                            val ActionBarContainerField = mActionBarIn::class.java.declaredFields.filter {
-                                it.type.name == "androidx.appcompat.widget.ActionBarContainer"
-                            }.first()
-                            LogUtil.log("ActionBarContainerField = ${ActionBarContainerField}")
-
-                            Objects.Main.HomeUI_mActionBar = XposedHelpers.getObjectField(mActionBarIn, ActionBarContainerField.name)
-                            LogUtil.log("HomeUI_mActionBar = ${Objects.Main.HomeUI_mActionBar}")
-
-                            Objects.Main.LauncherUI_mViewPager = viewPager
-
-                            // region 微信底栏 & action bar
-                            val is_hook_tab = !HookConfig.is_key_hide_tab && HookConfig.is_hook_tab
-                            val isTabLayoutOnBottom = is_hook_tab && !HookConfig.is_tab_layout_on_top
-                            val isTabLayoutOnTop = is_hook_tab && HookConfig.is_tab_layout_on_top
-                            val isKeyHideTab = isTabLayoutOnTop || (!is_hook_tab && HookConfig.is_key_hide_tab)
-                            val shouldFix = isTabLayoutOnTop || HookConfig.is_hook_hide_actionbar
-                            val floatButtonMarginBottom = if (isTabLayoutOnBottom || (!isKeyHideTab)) 1 else 0
-
-                            val tabView = linearViewGroup.getChildAt(1) as ViewGroup
-                            val tabViewUnderneathHeight = measureHeight(tabView)
-                            if (BackgroundImageHook._tabLayoutHeightOnBottom < 0)
-                                BackgroundImageHook._tabLayoutHeightOnBottom = tabViewUnderneathHeight
-
-                            if (isKeyHideTab) {
-                                // region 隐藏底栏
-                                if (WechatGlobal.wxVersion!! >= Version("6.7.2")) {
-                                    // 672报错
-                                    val bottomLine = tabView.getChildAt(0)
-                                    bottomLine.visibility = View.GONE
-                                    bottomLine.layoutParams.height = 0
-                                } else {
-                                    linearViewGroup.removeView(tabView)
-                                }
-                                LogUtil.log("移除 tabView $tabView")
-                                //endregion
-                            }
-
-                            when {
-                                isTabLayoutOnTop -> {
-                                    try {
-                                        LogUtil.log("添加 TabLayout")
-                                        TabLayoutHook.addTabLayout(linearViewGroup)
-                                    } catch (e: Throwable) {
-                                        LogUtil.log("添加 TabLayout 报错")
-                                        LogUtil.log(e)
-                                    }
-                                }
-                                isTabLayoutOnBottom -> {
-                                    try {
-                                        LogUtil.log("添加底栏")
-                                        TabLayoutHook.addTabLayoutAtBottom(tabView, tabViewUnderneathHeight)
-                                        LogUtil.log("添加底栏成功")
-                                    } catch (e: Throwable) {
-                                        LogUtil.log("添加底栏 报错")
-                                        LogUtil.log(e)
-                                    }
-                                }
-                                else -> {
-                                    LogUtil.log("不用添加 TabLayout")
-                                    BackgroundImageHook._tabLayoutLocation[1] = -1
-                                }
-                            }
-                            if (shouldFix) {
-                                // 隐藏 action bar 测试
-                                HomeActionBarHook.fix(linearViewGroup)
-                            }
-                            LogUtil.log("fix completed")
-                            //endregion
-
-                            // float menu
-                            if (HookConfig.is_hook_float_button) {
-                                try {
-                                    LogUtil.log("添加 FloatMenu")
-                                    FloatMenuHook.addFloatMenu(contentViewGroup, floatButtonMarginBottom * tabViewUnderneathHeight)
-                                } catch (e: Throwable) {
-                                    LogUtil.log("添加 FloatMenu 报错")
-                                    LogUtil.log(e)
-                                }
-                            }
-                            XposedHelpers.setAdditionalInstanceField(activity, keyInit, true)
-                            LogUtil.log("LaunchUI Hook Completed.")
-                        } catch (e: Exception) {
-                            LogUtil.log(e)
-                        }
+                        handleLauncherResumed(activity, "Activity.onPostResume")
                     }
                 })
+        try {
+            XposedBridge.hookAllMethods(Classes.LauncherUI, "onResume", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val activity = param.thisObject as? Activity ?: return
+                    handleLauncherResumed(activity, "LauncherUI.onResumeDirect")
+                }
+            })
+        } catch (t: Throwable) {
+            LogUtil.log(t)
+        }
+    }
+
+    private fun handleLauncherResumed(activity: Activity, source: String) {
+        LogUtil.log("$source activity = $activity")
+        RuntimeProbe.append(activity, "$source activity=${activity::class.java.name}")
+
+        try {
+            val activityClassLoader = activity::class.java.classLoader
+            if (activityClassLoader != null && activityClassLoader != WechatGlobal.wxLoader) {
+                RuntimeProbe.append(activity, "$source classLoaderMismatch old=${WechatGlobal.wxLoader} new=$activityClassLoader")
+                LogUtil.toast("加载错误，请打开 MDWechat 主界面的 [play 开关] (详情请查看日志)。", true)
+                LogUtil.log("微信使用的classloader = $activityClassLoader")
+                LogUtil.log("MDWechat使用的classloader = ${WechatGlobal.wxLoader}")
+                LogUtil.log("\n\n==============================================================================")
+                LogUtil.log("\n  ClassLoader加载错误，请打开 MDWechat 主界面的 [play 开关] (如已打开请忽略)。\n")
+                LogUtil.log("==============================================================================\n\n")
+                WechatGlobal.wxLoader = activityClassLoader
+                Classes.setLauncherUI()
+            }
+            WechatGlobal.preloaded = true
+
+            if (activity::class.java != Classes.LauncherUI) {
+                RuntimeProbe.append(activity, "$source skipped class=${activity::class.java.name}")
+                return
+            }
+            WeChatHelper.reloadPrefs()
+            val isInit = XposedHelpers.getAdditionalInstanceField(activity, keyInit)
+            if (isInit != null) {
+                LogUtil.log("LauncherUI 已经hook过")
+                RuntimeProbe.append(activity, "$source alreadyInit")
+                return
+            }
+            LogUtil.log("LauncherUI onResume(), start hook")
+            RuntimeProbe.clear(activity)
+            RuntimeProbe.append(activity, "$source initStart")
+            initHookLauncherUI(activity, source)
+        } catch (t: Throwable) {
+            RuntimeProbe.append(activity, "$source failed ${t.javaClass.name}:${t.message}")
+            throw t
+        }
+    }
+
+    private fun initHookLauncherUI(activity: Activity, source: String) {
+        try {
+            val density = activity.resources.displayMetrics.density
+            AppCustomConfig.bitmapScale = density / 3F
+
+            Objects.Main.LauncherUI = activity
+            RuntimeProbe.append(activity, "$source bitmapScale=${AppCustomConfig.bitmapScale}")
+            val homeUI = LauncherUI_mHomeUI.get(activity)
+            RuntimeProbe.append(activity, "$source homeUIField=${LauncherUI_mHomeUI.name} value=${homeUI?.javaClass?.name}")
+            val mainTabUI = HomeUI_mMainTabUI.get(homeUI)
+            RuntimeProbe.append(activity, "$source mainTabField=${HomeUI_mMainTabUI.name} value=${mainTabUI?.javaClass?.name}")
+            val viewPager = MainTabUI_mCustomViewPager.get(mainTabUI)
+            RuntimeProbe.append(activity, "$source viewPagerField=${MainTabUI_mCustomViewPager.name} value=${viewPager?.javaClass?.name}")
+            if (viewPager == null || viewPager !is View) {
+                LogUtil.log("MainTabUI_mCustomViewPager == null return;")
+                RuntimeProbe.append(activity, "$source viewPagerInvalid")
+                return
+            }
+
+            val linearViewGroup = viewPager.parent as ViewGroup
+            BackgroundImageHook.contactPageParent = linearViewGroup
+            val contentViewGroup = linearViewGroup.parent as ViewGroup
+            Objects.Main.LauncherUI_mContentLayout = contentViewGroup
+
+            val mActionBar = Fields.HomeUI_mActionBar.get(homeUI)
+            RuntimeProbe.append(activity, "$source actionBarField=${Fields.HomeUI_mActionBar.name} value=${mActionBar?.javaClass?.name}")
+            val actionBarContainer = findNestedInstanceByType(mActionBar, Classes.ActionBarContainer)
+                    ?: throw NoSuchElementException("ActionBarContainer not found in ${mActionBar::class.java.name}; fields=${describeFields(mActionBar::class.java)}")
+            Objects.Main.HomeUI_mActionBar = actionBarContainer
+            LogUtil.log("HomeUI_mActionBar = ${Objects.Main.HomeUI_mActionBar}")
+            RuntimeProbe.append(activity, "$source actionBarContainerValue=${actionBarContainer.javaClass.name}")
+
+            Objects.Main.LauncherUI_mViewPager = viewPager
+
+            val is_hook_tab = !HookConfig.is_key_hide_tab && HookConfig.is_hook_tab
+            val isTabLayoutOnBottom = is_hook_tab && !HookConfig.is_tab_layout_on_top
+            val isTabLayoutOnTop = is_hook_tab && HookConfig.is_tab_layout_on_top
+            val isKeyHideTab = isTabLayoutOnTop || (!is_hook_tab && HookConfig.is_key_hide_tab)
+            val shouldFix = isTabLayoutOnTop || HookConfig.is_hook_hide_actionbar
+            val floatButtonMarginBottom = if (isTabLayoutOnBottom || (!isKeyHideTab)) 1 else 0
+
+            val tabView = linearViewGroup.getChildAt(1) as ViewGroup
+            val tabViewUnderneathHeight = measureHeight(tabView)
+            if (BackgroundImageHook._tabLayoutHeightOnBottom < 0)
+                BackgroundImageHook._tabLayoutHeightOnBottom = tabViewUnderneathHeight
+
+            if (isKeyHideTab) {
+                if (WechatGlobal.wxVersion!! >= Version("6.7.2")) {
+                    val bottomLine = tabView.getChildAt(0)
+                    bottomLine.visibility = View.GONE
+                    bottomLine.layoutParams.height = 0
+                } else {
+                    linearViewGroup.removeView(tabView)
+                }
+                LogUtil.log("移除 tabView $tabView")
+            }
+
+            when {
+                isTabLayoutOnTop -> {
+                    try {
+                        LogUtil.log("添加 TabLayout")
+                        TabLayoutHook.addTabLayout(linearViewGroup)
+                        RuntimeProbe.append(activity, "$source topTabAdded")
+                    } catch (e: Throwable) {
+                        LogUtil.log("添加 TabLayout 报错")
+                        LogUtil.log(e)
+                        RuntimeProbe.append(activity, "$source topTabFailed ${e.javaClass.name}:${e.message}")
+                    }
+                }
+                isTabLayoutOnBottom -> {
+                    try {
+                        LogUtil.log("添加底栏")
+                        TabLayoutHook.addTabLayoutAtBottom(tabView, tabViewUnderneathHeight)
+                        LogUtil.log("添加底栏成功")
+                        RuntimeProbe.append(activity, "$source bottomTabAdded")
+                    } catch (e: Throwable) {
+                        LogUtil.log("添加底栏 报错")
+                        LogUtil.log(e)
+                        RuntimeProbe.append(activity, "$source bottomTabFailed ${e.javaClass.name}:${e.message}")
+                    }
+                }
+                else -> {
+                    LogUtil.log("不用添加 TabLayout")
+                    BackgroundImageHook._tabLayoutLocation[1] = -1
+                    RuntimeProbe.append(activity, "$source tabLayoutSkipped")
+                }
+            }
+            if (shouldFix) {
+                HomeActionBarHook.fix(linearViewGroup)
+            }
+            LogUtil.log("fix completed")
+
+            if (HookConfig.is_hook_float_button) {
+                try {
+                    LogUtil.log("添加 FloatMenu")
+                    FloatMenuHook.addFloatMenu(contentViewGroup, floatButtonMarginBottom * tabViewUnderneathHeight)
+                    RuntimeProbe.append(activity, "$source floatMenuAdded")
+                } catch (e: Throwable) {
+                    LogUtil.log("添加 FloatMenu 报错")
+                    LogUtil.log(e)
+                    RuntimeProbe.append(activity, "$source floatMenuFailed ${e.javaClass.name}:${e.message}")
+                }
+            }
+            XposedHelpers.setAdditionalInstanceField(activity, keyInit, true)
+            LogUtil.log("LaunchUI Hook Completed.")
+            RuntimeProbe.append(activity, "$source initDone tab=${HookConfig.is_hook_tab} tabBg=${HookConfig.is_hook_tab_bg} actionBarColor=${HookConfig.is_hook_actionbar_color} floatButton=${HookConfig.is_hook_float_button}")
+        } catch (e: Exception) {
+            RuntimeProbe.append(activity, "$source initFailed ${e.javaClass.name}:${e.message}")
+            LogUtil.log(e)
+        }
+    }
+
+    private fun allFields(clazz: Class<*>): Sequence<Field> {
+        return generateSequence(clazz) { it.superclass }
+                .takeWhile { it != Any::class.java }
+                .flatMap { it.declaredFields.asSequence() }
+    }
+
+    private fun findNestedInstanceByType(root: Any, targetType: Class<*>, maxDepth: Int = 5): Any? {
+        val visited = Collections.newSetFromMap(IdentityHashMap<Any, Boolean>())
+        return findNestedInstanceByType(root, targetType, maxDepth, visited)
+    }
+
+    private fun findNestedInstanceByType(root: Any?, targetType: Class<*>, depth: Int, visited: MutableSet<Any>): Any? {
+        root ?: return null
+        if (!visited.add(root)) {
+            return null
+        }
+        if (targetType.isAssignableFrom(root::class.java)) {
+            return root
+        }
+        if (depth <= 0) {
+            return null
+        }
+        allFields(root::class.java).forEach { field ->
+            if (!shouldTraverse(field.type)) {
+                return@forEach
+            }
+            field.isAccessible = true
+            val value = runCatching { field.get(root) }.getOrNull() ?: return@forEach
+            if (targetType.isAssignableFrom(value::class.java)) {
+                return value
+            }
+            findNestedInstanceByType(value, targetType, depth - 1, visited)?.let {
+                return it
+            }
+        }
+        return null
+    }
+
+    private fun shouldTraverse(type: Class<*>): Boolean {
+        if (type.isPrimitive || type.isEnum || type.isArray) {
+            return false
+        }
+        val typeName = type.name
+        return !typeName.startsWith("java.lang.") &&
+                !typeName.startsWith("kotlin.") &&
+                !typeName.startsWith("android.util.")
+    }
+
+    private fun describeFields(clazz: Class<*>): String {
+        return allFields(clazz)
+                .take(20)
+                .joinToString(",") { "${it.name}:${it.type.name}" }
     }
 
     private val mainTabUIPageAdapterHook = Hooker {
@@ -324,20 +395,19 @@ object LauncherUIHooker : HookerProvider {
                 menu.removeItem(2)
             }
         })
-        XposedHelpers.findAndHookMethod(Classes.ActionMenuView, "add",
-                Int::class.java, Int::class.java, Int::class.java, CharSequence::class.java,
-                object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        if (param.args.size == 4) {
-                            val str = param.args[3]
-                            val menuItem = param.result as MenuItem
-                            if (str == "微X模块") {
-                                LogUtil.log("检测到 微X模块")
-                                menuItem.isVisible = false
-                                Objects.Main.LauncherUI_mWechatXMenuItem = menuItem
-                            }
-                        }
-                    }
-                })
+        XposedBridge.hookAllMethods(Classes.ActionMenuView, "add", object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.args.size != 4 || param.result !is MenuItem) {
+                    return
+                }
+                val str = param.args[3]
+                val menuItem = param.result as MenuItem
+                if (str == "微X模块") {
+                    LogUtil.log("检测到 微X模块")
+                    menuItem.isVisible = false
+                    Objects.Main.LauncherUI_mWechatXMenuItem = menuItem
+                }
+            }
+        })
     }
 }

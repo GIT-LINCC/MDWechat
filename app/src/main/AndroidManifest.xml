@@ -29,6 +29,9 @@
         <meta-data
             android:name="xposedminversion"
             android:value="42" />
+        <meta-data
+            android:name="xposedsharedprefs"
+            android:value="true" />
         <!--xposed 推荐作用域-->
         <meta-data
             android:name="xposedscope"

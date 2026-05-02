@@ -12,10 +12,54 @@ import com.blanke.mdwechat.auto_search.Classes.LauncherUI
 //import com.blanke.mdwechat.auto_search.Classes.LauncherUIBottomTabViewItem
 import com.blanke.mdwechat.auto_search.Classes.MainTabUI
 import com.blanke.mdwechat.auto_search.Classes.PreferenceFragment
+import com.blanke.mdwechat.auto_search.Logs.i
 import com.blanke.mdwechat.util.ReflectionUtil.findFieldsWithType
 import java.lang.reflect.Field
 
 object Fields {
+    private val actionBarTypeNames = arrayOf(
+            "android.support.v7.app.ActionBar",
+            "androidx.appcompat.app.ActionBar"
+    )
+    private val appCompatInternalPackages = arrayOf(
+            "android.support.v7.app.",
+            "androidx.appcompat.app."
+    )
+
+    private fun loadClass(typeName: String): Class<*>? {
+        return try {
+            Class.forName(typeName, false, WechatGlobal.wxLoader)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun fieldMatchesActionBar(field: Field, actionBarClass: Class<*>): Boolean {
+        return generateSequence(field.type) { it.superclass }.any { currentClass ->
+            actionBarClass.isAssignableFrom(currentClass) ||
+                    currentClass.declaredFields.any { nestedField ->
+                        actionBarClass.isAssignableFrom(nestedField.type)
+                    }
+        }
+    }
+
+    private fun allFields(clazz: Class<*>): Sequence<Field> {
+        return generateSequence(clazz) { it.superclass }
+                .takeWhile { it != Any::class.java }
+                .flatMap { it.declaredFields.asSequence() }
+    }
+
+    private fun logHomeUIHierarchy(homeUI: Class<*>) {
+        generateSequence(homeUI) { it.superclass }
+                .take(6)
+                .forEach { clazz ->
+                    i("HomeUI调试 ${clazz.name}")
+                    clazz.declaredFields.forEach { field ->
+                        i("  ${field.name}: ${field.type.name}")
+                    }
+                }
+    }
+
     val LauncherUI_mHomeUI: Field?
         get() {
             return findFieldsWithType(LauncherUI!!, HomeUI!!.name)
@@ -37,14 +81,35 @@ object Fields {
 
     val HomeUI_mActionBar: Field?
         get() {
-            var fields = findFieldsWithType(
-                    HomeUI!!, "android.support.v7.app.ActionBar")
-            //wx8.0.3
-            if (fields.size == 0) {
-                fields = findFieldsWithType(
-                        HomeUI!!, "androidx.appcompat.app.ActionBar")
-            }
-            return fields.firstOrNull()?.apply { isAccessible = true }
+            val homeUI = HomeUI ?: return null
+            val actionBarClasses = actionBarTypeNames
+                    .mapNotNull(::loadClass)
+
+            actionBarClasses
+                    .forEach { actionBarClass ->
+                        allFields(homeUI).firstOrNull { actionBarClass.isAssignableFrom(it.type) }
+                                ?.apply { isAccessible = true }
+                                ?.let { return it }
+                    }
+
+            actionBarClasses
+                    .forEach { actionBarClass ->
+                        allFields(homeUI).firstOrNull { fieldMatchesActionBar(it, actionBarClass) }
+                                ?.apply { isAccessible = true }
+                                ?.let { return it }
+                    }
+
+            homeUI.declaredFields
+                    .firstOrNull { candidateField ->
+                        val typeName = candidateField.type.name
+                        appCompatInternalPackages.any { typeName.startsWith(it) } &&
+                                typeName !in actionBarTypeNames
+                    }
+                    ?.apply { isAccessible = true }
+                    ?.let { return it }
+
+            logHomeUIHierarchy(homeUI)
+            return null
         }
 
 //    val LauncherUIBottomTabViewItem_mTextViews: List<Field>?

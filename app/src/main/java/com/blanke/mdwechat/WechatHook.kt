@@ -1,6 +1,7 @@
 package com.blanke.mdwechat
 
 import com.blanke.mdwechat.Common.isVXPEnv
+import com.blanke.mdwechat.config.AppCustomConfig
 import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.config.ViewTreeConfig
 import com.blanke.mdwechat.config.WxVersionConfig
@@ -9,16 +10,26 @@ import com.blanke.mdwechat.hookers.base.Hooker
 import com.blanke.mdwechat.hookers.base.HookerProvider
 import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.LogUtil.log
+import com.blanke.mdwechat.util.RuntimeProbe
+import com.blanke.mdwechat.util.FileUtils
 import com.blanke.mdwechat.util.waitInvoke
 import com.joshcai.mdwechat.BuildConfig
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 
 class WechatHook : IXposedHookLoadPackage {
+    private fun debugLine(msg: String) {
+        val stamp = SimpleDateFormat("HH:mm:ss").format(Date())
+        FileUtils.write(AppCustomConfig.getLogFile("hook_debug"), "$stamp $msg\n", true)
+    }
 
     @Throws(Throwable::class)
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         try {
+            debugLine("handleLoadPackage package=${lpparam.packageName} process=${lpparam.processName}")
             log(lpparam.packageName)
             if (!(lpparam.packageName.contains("com.tencent") && lpparam.packageName.contains("mm")))
                 return
@@ -26,7 +37,9 @@ class WechatHook : IXposedHookLoadPackage {
             if (lpparam.processName.contains(":")) {
                 return
             }
+            debugLine("before initPrefs")
             WeChatHelper.initPrefs()
+            debugLine("after initPrefs")
             if (!HookConfig.is_hook_switch) {
                 log("模块总开关已关闭")
                 return
@@ -68,6 +81,7 @@ class WechatHook : IXposedHookLoadPackage {
             }
             hookMain(lpparam, preloadHooker, hookers)
         } catch (e: Throwable) {
+            debugLine("handleLoadPackage failed: ${e.javaClass.name}: ${e.message}")
             log(e)
         }
     }
@@ -75,18 +89,55 @@ class WechatHook : IXposedHookLoadPackage {
     private fun hookMain(lpparam: XC_LoadPackage.LoadPackageParam, preloadHooker: Hooker, plugins: List<HookerProvider>) {
         enableHookers(listOf(ContextHooker))
         WechatGlobal.init(lpparam)
+        val configPath = AppCustomConfig.getWxConfigFile("${WechatGlobal.wxVersion}.config")
+        debugLine("configPath=$configPath exists=${File(configPath).exists()} canRead=${File(configPath).canRead()}")
+        log("configPath=$configPath exists=${File(configPath).exists()} canRead=${File(configPath).canRead()}")
         try {
             WechatGlobal.wxVersionConfig = WxVersionConfig.loadConfig(WechatGlobal.wxVersion!!.toString())
-            preloadHooker.hook()
-            ViewTreeConfig.set(WechatGlobal.wxVersion!!)
         } catch (e: Exception) {
+            val detail = buildString {
+                append(e.javaClass.simpleName)
+                e.message?.takeIf { it.isNotBlank() }?.let {
+                    append(": ")
+                    append(it.take(80))
+                }
+                e.suppressed.firstOrNull()?.let {
+                    append(" | ")
+                    append(it.javaClass.simpleName)
+                    it.message?.takeIf { msg -> msg.isNotBlank() }?.let { msg ->
+                        append(": ")
+                        append(msg.take(80))
+                    }
+                }
+            }
+            debugLine("loadConfig failed: ${e.javaClass.name}: ${e.message}")
+            LogUtil.exportLog("loadConfig failed: ${e.javaClass.name}: ${e.message}")
+            log("loadConfig failed: ${e.javaClass.name}: ${e.message}")
+            log(e)
             waitInvoke(100, true,
                     { Objects.Main.context != null },
                     {
-//                        LogUtil.toast("无法读取配置文件，请开启微信的存储权限后，打开 mdwechat 生成本机微信配置文件。", true)
-                        LogUtil.toast("无法读取配置文件，请开启微信的存储权限后，打开 mdwechat 生成本机微信配置文件。", true)
+                        LogUtil.toast("无法读取配置文件[$detail]，请打开 mdwechat 重新生成本机配置。", true)
                     })
             log("${WechatGlobal.wxVersion} 配置文件不存在或解析失败")
+            return
+        }
+        try {
+            preloadHooker.hook()
+        } catch (e: Exception) {
+            debugLine("preloadHooker failed: ${e.javaClass.name}: ${e.message}")
+            LogUtil.exportLog("preloadHooker failed: ${e.javaClass.name}: ${e.message}")
+            log("preloadHooker failed: ${e.javaClass.name}: ${e.message}")
+            log(e)
+            return
+        }
+        try {
+            ViewTreeConfig.set(WechatGlobal.wxVersion!!)
+        } catch (e: Exception) {
+            debugLine("ViewTreeConfig.set failed: ${e.javaClass.name}: ${e.message}")
+            LogUtil.exportLog("ViewTreeConfig.set failed: ${e.javaClass.name}: ${e.message}")
+            log("ViewTreeConfig.set failed: ${e.javaClass.name}: ${e.message}")
+            log(e)
             return
         }
         log("wechat version=" + WechatGlobal.wxVersion
@@ -103,13 +154,33 @@ class WechatHook : IXposedHookLoadPackage {
     }
 
     fun enableHookers(plugins: List<HookerProvider>) {
+        val failures = mutableListOf<String>()
         plugins.forEach { provider ->
-            provider.provideStaticHookers()?.forEach { hooker ->
-                if (!hooker.hasHooked) {
-                    hooker.hook()
-                    hooker.hasHooked = true
+            try {
+                provider.provideStaticHookers()?.forEachIndexed { index, hooker ->
+                    if (!hooker.hasHooked) {
+                        try {
+                            hooker.hook()
+                            hooker.hasHooked = true
+                        } catch (e: Throwable) {
+                            failures.add("${provider.javaClass.simpleName}[$index]:${e.javaClass.simpleName}")
+                            log("${provider.javaClass.simpleName} hooker[$index] failed: ${e.javaClass.name}: ${e.message}")
+                            log(e)
+                        }
+                    }
                 }
+            } catch (e: Throwable) {
+                failures.add("${provider.javaClass.simpleName}:${e.javaClass.simpleName}")
+                log("${provider.javaClass.simpleName} provider failed: ${e.javaClass.name}: ${e.message}")
+                log(e)
             }
+        }
+        if (failures.isNotEmpty()) {
+            val detail = failures.take(3).joinToString(" | ")
+            waitInvoke(200, true, { Objects.Main.LauncherUI != null }, {
+                RuntimeProbe.append(Objects.Main.LauncherUI as? android.content.Context, "enableHookers failures=$detail")
+                LogUtil.toast("Hook失败: $detail", true)
+            })
         }
         log("模块加载成功")
     }
