@@ -1,6 +1,8 @@
 package com.github.clans.fab;
 
 import android.annotation.TargetApi;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.content.res.TypedArray;
@@ -31,9 +33,11 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.animation.AccelerateInterpolator;
 import android.view.animation.AlphaAnimation;
 import android.view.animation.Animation;
 import android.view.animation.AnimationUtils;
+import android.view.animation.OvershootInterpolator;
 import android.widget.ImageButton;
 import android.widget.TextView;
 
@@ -41,6 +45,9 @@ public class FloatingActionButton extends ImageButton {
 
     public static final int SIZE_NORMAL = 0;
     public static final int SIZE_MINI = 1;
+    private static final long VISIBILITY_ANIMATION_DURATION = 200L;
+    private static final float HIDDEN_SCALE = 0f;
+    private static final float VISIBLE_SCALE = 1f;
 
     int mFabSize;
     boolean mShowShadow;
@@ -504,13 +511,86 @@ public class FloatingActionButton extends ImageButton {
     }
 
     void playShowAnimation() {
-        mHideAnimation.cancel();
-        startAnimation(mShowAnimation);
+        cancelVisibilityAnimation();
+        super.setVisibility(VISIBLE);
+        setAlpha(0f);
+        setScaleX(HIDDEN_SCALE);
+        setScaleY(HIDDEN_SCALE);
+        animate()
+                .alpha(1f)
+                .scaleX(VISIBLE_SCALE)
+                .scaleY(VISIBLE_SCALE)
+                .setDuration(VISIBILITY_ANIMATION_DURATION)
+                .setInterpolator(new OvershootInterpolator())
+                .setListener(new AnimatorListenerAdapter() {
+                    private boolean mCancelled;
+
+                    @Override
+                    public void onAnimationCancel(Animator animation) {
+                        mCancelled = true;
+                    }
+
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        super.onAnimationEnd(animation);
+                        if (!mCancelled) {
+                            resetVisibilityAnimationState();
+                        }
+                        animate().setListener(null);
+                    }
+                });
     }
 
     void playHideAnimation() {
-        mShowAnimation.cancel();
-        startAnimation(mHideAnimation);
+        playHideAnimation(INVISIBLE);
+    }
+
+    private void playHideAnimation(final int targetVisibility) {
+        cancelVisibilityAnimation();
+        animate()
+                .alpha(0f)
+                .scaleX(HIDDEN_SCALE)
+                .scaleY(HIDDEN_SCALE)
+                .setDuration(VISIBILITY_ANIMATION_DURATION)
+                .setInterpolator(new AccelerateInterpolator(2f))
+                .setListener(new AnimatorListenerAdapter() {
+                    private boolean mCancelled;
+
+                    @Override
+                    public void onAnimationCancel(Animator animation) {
+                        mCancelled = true;
+                    }
+
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        super.onAnimationEnd(animation);
+                        if (!mCancelled) {
+                            applyFinalVisibility(targetVisibility);
+                            resetVisibilityAnimationState();
+                        }
+                        animate().setListener(null);
+                    }
+                });
+    }
+
+    private void cancelVisibilityAnimation() {
+        clearAnimation();
+        animate().cancel();
+        animate().setListener(null);
+    }
+
+    private void resetVisibilityAnimationState() {
+        setAlpha(1f);
+        setScaleX(VISIBLE_SCALE);
+        setScaleY(VISIBLE_SCALE);
+    }
+
+    private void applyFinalVisibility(int visibility) {
+        if (visibility == GONE) {
+            FloatingActionButton.this.setVisibility(GONE);
+        } else {
+            FloatingActionButton.super.setVisibility(visibility);
+        }
     }
 
     OnClickListener getOnClickListener() {
@@ -1053,11 +1133,14 @@ public class FloatingActionButton extends ImageButton {
      * @param animate if true - plays "show animation"
      */
     public void show(boolean animate) {
-        if (isHidden()) {
+        if (getVisibility() != VISIBLE || getAlpha() != 1f || getScaleX() != VISIBLE_SCALE || getScaleY() != VISIBLE_SCALE) {
             if (animate) {
                 playShowAnimation();
+            } else {
+                cancelVisibilityAnimation();
+                resetVisibilityAnimationState();
+                super.setVisibility(VISIBLE);
             }
-            super.setVisibility(VISIBLE);
         }
     }
 
@@ -1067,11 +1150,14 @@ public class FloatingActionButton extends ImageButton {
      * @param animate if true - plays "hide animation"
      */
     public void hide(boolean animate) {
-        if (!isHidden()) {
+        if (getVisibility() == VISIBLE) {
             if (animate) {
                 playHideAnimation();
+            } else {
+                cancelVisibilityAnimation();
+                resetVisibilityAnimationState();
+                FloatingActionButton.super.setVisibility(INVISIBLE);
             }
-            super.setVisibility(INVISIBLE);
         }
     }
 
@@ -1268,28 +1354,18 @@ public class FloatingActionButton extends ImageButton {
      */
     public void hideButtonInMenu(boolean animate) {
         if (!isHidden() && getVisibility() != GONE) {
-            hide(animate);
+            if (animate) {
+                playHideAnimation(GONE);
+            } else {
+                cancelVisibilityAnimation();
+                resetVisibilityAnimationState();
+                applyFinalVisibility(GONE);
+            }
 
             Label label = getLabelView();
             if (label != null) {
                 label.hide(animate);
             }
-
-            getHideAnimation().setAnimationListener(new Animation.AnimationListener() {
-                @Override
-                public void onAnimationStart(Animation animation) {
-                }
-
-                @Override
-                public void onAnimationEnd(Animation animation) {
-                    setVisibility(GONE);
-                    getHideAnimation().setAnimationListener(null);
-                }
-
-                @Override
-                public void onAnimationRepeat(Animation animation) {
-                }
-            });
         }
     }
 

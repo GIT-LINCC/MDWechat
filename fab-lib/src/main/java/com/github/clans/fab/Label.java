@@ -1,6 +1,8 @@
 package com.github.clans.fab;
 
 import android.annotation.TargetApi;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Canvas;
@@ -23,12 +25,20 @@ import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewOutlineProvider;
+import android.view.animation.AccelerateInterpolator;
 import android.view.animation.Animation;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.TextView;
 
 public class Label extends TextView {
 
     private static final Xfermode PORTER_DUFF_CLEAR = new PorterDuffXfermode(PorterDuff.Mode.CLEAR);
+    private static final long VISIBILITY_ANIMATION_DURATION = 200L;
+    private static final float HIDDEN_SCALE = 0.92f;
+    private static final float VISIBLE_SCALE = 1f;
+    private static final float SHADOW_RADIUS_SCALE = 0.7f;
+    private static final float SHADOW_X_OFFSET_SCALE = 0.35f;
+    private static final float SHADOW_Y_OFFSET_SCALE = 0.7f;
 
     private int mShadowRadius;
     private int mShadowXOffset;
@@ -129,7 +139,7 @@ public class Label extends TextView {
             setOutlineProvider(new ViewOutlineProvider() {
                 @Override
                 public void getOutline(View view, Outline outline) {
-                    outline.setOval(0, 0, view.getWidth(), view.getHeight());
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), mCornerRadius);
                 }
             });
             setClipToOutline(true);
@@ -162,9 +172,9 @@ public class Label extends TextView {
 
     private void setShadow(FloatingActionButton fab) {
         mShadowColor = fab.getShadowColor();
-        mShadowRadius = fab.getShadowRadius();
-        mShadowXOffset = fab.getShadowXOffset();
-        mShadowYOffset = fab.getShadowYOffset();
+        mShadowRadius = Math.max(1, Math.round(fab.getShadowRadius() * SHADOW_RADIUS_SCALE));
+        mShadowXOffset = Math.round(fab.getShadowXOffset() * SHADOW_X_OFFSET_SCALE);
+        mShadowYOffset = Math.max(1, Math.round(fab.getShadowYOffset() * SHADOW_Y_OFFSET_SCALE));
         mShowShadow = fab.hasShadow();
     }
 
@@ -179,17 +189,74 @@ public class Label extends TextView {
     }
 
     private void playShowAnimation() {
-        if (mShowAnimation != null) {
-            mHideAnimation.cancel();
-            startAnimation(mShowAnimation);
-        }
+        cancelVisibilityAnimation();
+        setVisibility(VISIBLE);
+        setAlpha(0f);
+        setScaleX(HIDDEN_SCALE);
+        setScaleY(HIDDEN_SCALE);
+        animate()
+                .alpha(1f)
+                .scaleX(VISIBLE_SCALE)
+                .scaleY(VISIBLE_SCALE)
+                .setDuration(VISIBILITY_ANIMATION_DURATION)
+                .setInterpolator(new DecelerateInterpolator())
+                .setListener(new AnimatorListenerAdapter() {
+                    private boolean mCancelled;
+
+                    @Override
+                    public void onAnimationCancel(Animator animation) {
+                        mCancelled = true;
+                    }
+
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        super.onAnimationEnd(animation);
+                        if (!mCancelled) {
+                            resetVisibilityAnimationState();
+                        }
+                        animate().setListener(null);
+                    }
+                });
     }
 
     private void playHideAnimation() {
-        if (mHideAnimation != null) {
-            mShowAnimation.cancel();
-            startAnimation(mHideAnimation);
-        }
+        cancelVisibilityAnimation();
+        animate()
+                .alpha(0f)
+                .scaleX(HIDDEN_SCALE)
+                .scaleY(HIDDEN_SCALE)
+                .setDuration(VISIBILITY_ANIMATION_DURATION)
+                .setInterpolator(new AccelerateInterpolator(1.5f))
+                .setListener(new AnimatorListenerAdapter() {
+                    private boolean mCancelled;
+
+                    @Override
+                    public void onAnimationCancel(Animator animation) {
+                        mCancelled = true;
+                    }
+
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        super.onAnimationEnd(animation);
+                        if (!mCancelled) {
+                            setVisibility(INVISIBLE);
+                            resetVisibilityAnimationState();
+                        }
+                        animate().setListener(null);
+                    }
+                });
+    }
+
+    private void cancelVisibilityAnimation() {
+        clearAnimation();
+        animate().cancel();
+        animate().setListener(null);
+    }
+
+    private void resetVisibilityAnimationState() {
+        setAlpha(1f);
+        setScaleX(VISIBLE_SCALE);
+        setScaleY(VISIBLE_SCALE);
     }
 
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
@@ -248,17 +315,25 @@ public class Label extends TextView {
     }
 
     void show(boolean animate) {
-        if (animate) {
-            playShowAnimation();
+        if (getVisibility() != VISIBLE || getAlpha() != 1f || getScaleX() != VISIBLE_SCALE || getScaleY() != VISIBLE_SCALE) {
+            if (animate) {
+                playShowAnimation();
+            } else {
+                cancelVisibilityAnimation();
+                resetVisibilityAnimationState();
+                setVisibility(VISIBLE);
+            }
         }
-        setVisibility(VISIBLE);
     }
 
     void hide(boolean animate) {
         if (animate) {
             playHideAnimation();
+        } else {
+            cancelVisibilityAnimation();
+            resetVisibilityAnimationState();
+            setVisibility(INVISIBLE);
         }
-        setVisibility(INVISIBLE);
     }
 
     void setShowAnimation(Animation showAnimation) {
