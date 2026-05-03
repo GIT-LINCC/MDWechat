@@ -180,14 +180,37 @@ public class Label extends TextView {
 
     private void playShowAnimation() {
         if (mShowAnimation != null) {
-            mHideAnimation.cancel();
+            if (mHideAnimation != null) {
+                mHideAnimation.setAnimationListener(null);
+                mHideAnimation.cancel();
+            }
+            clearAnimation();
             startAnimation(mShowAnimation);
         }
     }
 
     private void playHideAnimation() {
         if (mHideAnimation != null) {
-            mShowAnimation.cancel();
+            if (mShowAnimation != null) {
+                mShowAnimation.cancel();
+            }
+            clearAnimation();
+            mHideAnimation.setAnimationListener(new Animation.AnimationListener() {
+                @Override
+                public void onAnimationStart(Animation animation) {
+                }
+
+                @Override
+                public void onAnimationEnd(Animation animation) {
+                    clearAnimation();
+                    setVisibility(INVISIBLE);
+                    animation.setAnimationListener(null);
+                }
+
+                @Override
+                public void onAnimationRepeat(Animation animation) {
+                }
+            });
             startAnimation(mHideAnimation);
         }
     }
@@ -248,17 +271,20 @@ public class Label extends TextView {
     }
 
     void show(boolean animate) {
+        clearAnimation();
+        setVisibility(VISIBLE);
         if (animate) {
             playShowAnimation();
         }
-        setVisibility(VISIBLE);
     }
 
     void hide(boolean animate) {
         if (animate) {
             playHideAnimation();
+        } else {
+            clearAnimation();
+            setVisibility(INVISIBLE);
         }
-        setVisibility(INVISIBLE);
     }
 
     void setShowAnimation(Animation showAnimation) {

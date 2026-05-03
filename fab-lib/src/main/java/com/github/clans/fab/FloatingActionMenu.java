@@ -822,7 +822,7 @@ public class FloatingActionMenu extends ViewGroup {
 
                             Label label = (Label) fab.getTag(R.id.fab_label);
                             if (label != null && label.isHandleVisibilityChanges()) {
-                                label.hide(animate);
+                                label.hide(false);
                             }
                         }
                     }, delay);

@@ -504,12 +504,35 @@ public class FloatingActionButton extends ImageButton {
     }
 
     void playShowAnimation() {
-        mHideAnimation.cancel();
+        if (mHideAnimation != null) {
+            mHideAnimation.setAnimationListener(null);
+            mHideAnimation.cancel();
+        }
+        clearAnimation();
         startAnimation(mShowAnimation);
     }
 
     void playHideAnimation() {
-        mShowAnimation.cancel();
+        if (mShowAnimation != null) {
+            mShowAnimation.cancel();
+        }
+        clearAnimation();
+        mHideAnimation.setAnimationListener(new Animation.AnimationListener() {
+            @Override
+            public void onAnimationStart(Animation animation) {
+            }
+
+            @Override
+            public void onAnimationEnd(Animation animation) {
+                clearAnimation();
+                FloatingActionButton.super.setVisibility(INVISIBLE);
+                animation.setAnimationListener(null);
+            }
+
+            @Override
+            public void onAnimationRepeat(Animation animation) {
+            }
+        });
         startAnimation(mHideAnimation);
     }
 
@@ -1054,10 +1077,11 @@ public class FloatingActionButton extends ImageButton {
      */
     public void show(boolean animate) {
         if (isHidden()) {
+            clearAnimation();
+            super.setVisibility(VISIBLE);
             if (animate) {
                 playShowAnimation();
             }
-            super.setVisibility(VISIBLE);
         }
     }
 
@@ -1070,8 +1094,10 @@ public class FloatingActionButton extends ImageButton {
         if (!isHidden()) {
             if (animate) {
                 playHideAnimation();
+            } else {
+                clearAnimation();
+                super.setVisibility(INVISIBLE);
             }
-            super.setVisibility(INVISIBLE);
         }
     }
 
