@@ -1,7 +1,18 @@
 MDWechat
 ====
 # 简介
- Fork自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat) ,支持微信8.0.32 / play版7.0.21.
+Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前维护分支为 `v4.0`。
+
+- 主要适配微信 `8.0.49`
+- 支持的微信版本范围：`6.7.3 - 8.0.49`
+- 只支持 Android 5.0 及以上
+
+# 近期更新
+1. 适配微信 `8.0.49`。
+2. 修复微信、通讯录、发现、我，以及聊天附件面板里的异常蓝色高亮矩形。
+3. 稳定微信 `8.0.49` 下主界面列表和页面背景显示。
+4. 重做悬浮按钮展开/收回动画，让图标与文字标签同步，并修正标签阴影与文字居中效果。
+5. 构建环境升级到 `AGP 7.1.2 + Gradle 7.5 + Kotlin 1.6.21`，命令行构建需要 `Java 11+`。
 
 # 效果预览
 [![gif_demo](https://z3.ax1x.com/2021/03/24/6bOQKJ.gif)](https://imgtu.com/i/6bOQKJ)
@@ -36,9 +47,16 @@ MDWechat
 19. 主界面字体颜色修改(2.0新增)
 
 # 版本支持
-- 只支持 Android 5.0 以上
-- 支持的微信版本: 6.7.3 - 8.0.49；由于测试不够全面， MDWechat 的某些功能可能对于某些微信版本不生效。若不生效可以升级微信版本或者反馈问题到Issue里。
+- 支持的微信版本: 6.7.3 - 8.0.49；由于测试不够全面，MDWechat 的某些功能可能对于某些微信版本不生效。若不生效可以升级微信版本或者反馈问题到 Issue 里。
 ~~- MDWechat(官改) 4.0 对于国内版的适配性比较好，play版微信在部分机型/框架上可能出现无法适配的状况。~~(4.1已修复这一部分play版适配)
+
+# 构建说明
+1. 命令行构建请使用 `Java 11` 到 `Java 17`。
+2. 调试构建命令：
+   `./gradlew :app:assembleDebug`
+3. 安装到设备：
+   `./gradlew :app:installDebug`
+4. `installDebug` 在安装完成后会自动重启目标微信进程。
 
 # 下载地址
 [下载地址](https://gitee.com/JoshCai/MDWechat/releases)

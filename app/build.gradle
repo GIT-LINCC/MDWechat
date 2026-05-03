@@ -62,17 +62,13 @@ dependencies {
 
 afterEvaluate {
     installDebug.doLast {
-        killTargetAPP.execute()
-        startTargetAPP.execute()
+        exec {
+            commandLine android.adbExecutable, 'shell', 'am', 'force-stop', pkg
+        }
+        exec {
+            commandLine android.adbExecutable, 'shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1'
+        }
     }
 }
 
 def pkg = 'com.tencent.mm'
-task killTargetAPP(type: Exec) {
-    commandLine android.adbExecutable, 'shell', 'am', 'force-stop', pkg
-}
-
-task startTargetAPP(type: Exec) {
-    //adb shell monkey -p your.app.package.name -c android.intent.category.LAUNCHER 1
-    commandLine android.adbExecutable, 'shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1'
-}
