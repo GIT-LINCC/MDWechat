@@ -613,8 +613,8 @@ public class FloatingActionMenu extends ViewGroup {
             int left = mLabelsPaddingLeft;
             int top = mLabelsPaddingTop;
             if (mLabelsShowShadow) {
-                left += fab.getShadowRadius() + Math.abs(fab.getShadowXOffset());
-                top += fab.getShadowRadius() + Math.abs(fab.getShadowYOffset());
+                left += label.calculateShadowWidth();
+                top += label.calculateShadowHeight();
             }
 
             label.setPadding(
@@ -822,7 +822,7 @@ public class FloatingActionMenu extends ViewGroup {
 
                             Label label = (Label) fab.getTag(R.id.fab_label);
                             if (label != null && label.isHandleVisibilityChanges()) {
-                                label.hide(false);
+                                label.hide(animate);
                             }
                         }
                     }, delay);
