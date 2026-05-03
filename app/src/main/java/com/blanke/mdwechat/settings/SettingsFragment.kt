@@ -67,6 +67,16 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         var isLogFile: Boolean = false
     }
 
+    companion object {
+        private const val PROJECT_GITHUB_URL = "https://github.com/GIT-LINCC/MDWechat"
+        private const val PROJECT_GITHUB_ISSUES_URL = "https://github.com/GIT-LINCC/MDWechat/issues"
+        private const val PROJECT_GITHUB_RELEASES_URL = "https://github.com/GIT-LINCC/MDWechat/releases"
+        private const val PROJECT_GITEE_URL = "https://gitee.com/JoshCai/MDWechat"
+        private const val LINCC_EMAIL = "lcc.spiritualism@gmail.com"
+        private const val LINCC_ALIPAY_URL = "https://qr.alipay.com/fkx15957bug79deqbnpvm5b"
+        private const val LINCC_WECHAT_PAY_CODE = "f2f0YfhLFwwZNNIC7hSEL0ybtySAiJpRyqBXv5ObkrZx1iA"
+    }
+
     private fun getWechatPath(): String {
         try {
             val pm = activity.packageManager
@@ -145,6 +155,8 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         findPreference(getString(R.string.key_alipay_red_packet))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_donate))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_donate_wechat))?.onPreferenceClickListener = this
+        findPreference(getString(R.string.key_donate_lincc))?.onPreferenceClickListener = this
+        findPreference(getString(R.string.key_donate_wechat_lincc))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_donate_joshcai))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_donate_wechat_joshcai))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_feedback))?.onPreferenceClickListener = this
@@ -164,7 +176,6 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
 
         findPreference(getString(R.string.key_joshcai_info))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_attention))?.onPreferenceClickListener = this
-        findPreference(getString(R.string.key_feedback_group))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_releases))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_start_use))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_Q_A))?.onPreferenceClickListener = this
@@ -551,6 +562,8 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
             getString(R.string.key_alipay_red_packet) -> donate("https://qr.alipay.com/cpx030345hsmmzm2j44ro47")
             getString(R.string.key_donate) -> donate("https://qr.alipay.com/tsx05730go4ditv2dmwia15")
             getString(R.string.key_donate_wechat) -> donateWechat("f2f0YjlNObKWk7zwpDQoGtBDBe-Cper5cndi")
+            getString(R.string.key_donate_lincc) -> donate(LINCC_ALIPAY_URL)
+            getString(R.string.key_donate_wechat_lincc) -> donateWechat(LINCC_WECHAT_PAY_CODE)
             getString(R.string.key_donate_joshcai) -> donate("https://qr.alipay.com/fkx12707x8vvnh6mjpqseb4")
             getString(R.string.key_donate_wechat_joshcai) -> donateWechat("f2f0xQLV4IlGwE3CHY7LelHelT0Uqklc-n9W")
             getString(R.string.key_feedback) -> feedback()
@@ -559,22 +572,21 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
             getString(R.string.key_reset_float_bottom_config) -> copyFloatBottomConfig()
             getString(R.string.key_reset_icon_config) -> resetIcons()
 //            getString(R.string.key_feedback_email_blanke) -> sendEmail()
-            getString(R.string.key_feedback_email_josh_cai) -> sendEmailCai()
-            getString(R.string.key_feedback_gitee) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat/issues")
-            getString(R.string.key_gitee_joshcai) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat")
+            getString(R.string.key_feedback_email_josh_cai) -> sendEmail(LINCC_EMAIL)
+            getString(R.string.key_feedback_gitee) -> gotoWebsite(PROJECT_GITHUB_ISSUES_URL)
+            getString(R.string.key_gitee_joshcai) -> gotoWebsite(PROJECT_GITEE_URL)
+            getString(R.string.key_github_joshcai) -> gotoWebsite(PROJECT_GITHUB_URL)
             getString(R.string.key_github_blanke) -> gotoWebsite("https://github.com/Blankeer/MDWechat")
-            getString(R.string.key_github_joshcai) -> gotoWebsite("https://github.com/JoshCai233/MDWechat")
             getString(R.string.key_generate_wechat_config) -> generateWechatFile()
             getString(R.string.key_download_wechat_config) -> downloadWechatConfig()
-            getString(R.string.key_attention) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat/wikis/?sort_id=2161250")
-            getString(R.string.key_feedback_group) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat/wikis/?sort_id=2161272")
-            getString(R.string.key_releases) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat/releases")
-            getString(R.string.key_start_use) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat/wikis/?sort_id=2157245")
-            getString(R.string.key_Q_A) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat/wikis/?sort_id=2160333")
-            getString(R.string.key_color_scheme_help) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat/wikis/?sort_id=2158297")
-            getString(R.string.key_background_help) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat/wikis/?sort_id=2158305")
-            getString(R.string.key_bubble_help) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat/wikis/?sort_id=2158251")
-            getString(R.string.key_float_button_help) -> gotoWebsite("https://gitee.com/JoshCai/MDWechat/wikis/?sort_id=2158249")
+            getString(R.string.key_attention) -> gotoMarkDownAct(getString(R.string.text_attention), getHelpFilePath("join_group.md"))
+            getString(R.string.key_releases) -> gotoWebsite(PROJECT_GITHUB_RELEASES_URL)
+            getString(R.string.key_start_use) -> gotoMarkDownAct(getString(R.string.text_start_use), getHelpFilePath("float_button.md"))
+            getString(R.string.key_Q_A) -> gotoWebsite(PROJECT_GITHUB_ISSUES_URL)
+            getString(R.string.key_color_scheme_help) -> gotoWebsite(PROJECT_GITHUB_URL)
+            getString(R.string.key_background_help) -> gotoMarkDownAct(getString(R.string.text_help_icon), getHelpFilePath("icon.md"))
+            getString(R.string.key_bubble_help) -> gotoMarkDownAct(getString(R.string.text_help_bubble), getHelpFilePath("bubble.md"))
+            getString(R.string.key_float_button_help) -> gotoMarkDownAct(getString(R.string.text_help_float_button), getHelpFilePath("float_button.md"))
 
             getString(R.string.key_select_bg_chat) -> getImage("tab_bg_chat.png", screenWidth, screenHeight)
             getString(R.string.key_select_bg_0) -> getImage("tab_bg0.png", screenWidth, screenHeight)
@@ -596,6 +608,10 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
 
     private fun gotoMarkDownAct(title: String, url: String) {
         MarkDownActivity.start(activity, title, url)
+    }
+
+    private fun getHelpFilePath(fileName: String): String {
+        return Common.APP_DIR_PATH + Common.HELP_DIR + File.separator + fileName
     }
 
     private fun downloadWechatConfig() {
@@ -689,7 +705,7 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
                 PackageManager.DONT_KILL_APP)
     }
 
-    private fun donate(payUrl: String = "https://qr.alipay.com/fkx12707x8vvnh6mjpqseb4") {
+    private fun donate(payUrl: String = LINCC_ALIPAY_URL) {
         val intent = Intent()
         intent.action = "android.intent.action.VIEW"
         intent.data = Uri.parse("alipayqr://platformapi/startapp?saId=10000007&clientVersion=3.7.0.0718&qrcode=" + payUrl)
@@ -701,7 +717,7 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         startActivity(intent)
     }
 
-    private fun donateWechat(wechatPayCode: String = "f2f0xQLV4IlGwE3CHY7LelHelT0Uqklc-n9W") {
+    private fun donateWechat(wechatPayCode: String = LINCC_WECHAT_PAY_CODE) {
         val className = "com.tencent.mm.plugin.base.stub.WXCustomSchemeEntryActivity"
         val componentName = ComponentName("com.tencent.mm", className)
         try {
@@ -730,25 +746,14 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         }
     }
 
-    //    private fun sendEmail() {
-//        try {
-//            val info = "mailto:blanke.master+mdwechat@gmail.com?subject=[MDWechat] 请简明描述该问题" +
-//                    "&body=请按以下步骤填写,不按此填写的邮件可能会被忽略,谢谢!%0d%0a[问题描述] 请描述遇到了什么问题%0d%0a[环境]请写明安卓版本 手机 rom xp 微信 版本%0d%0a[日志]可以传附件"
-//            val uri = Uri.parse(info)
-//            startActivity(Intent(Intent.ACTION_SENDTO, uri))
-//        } catch (e: Exception) {
-//
-//        }
-//    }
-//
-    private fun sendEmailCai() {
+    private fun sendEmail(email: String) {
         try {
-            val info = "mailto:joshcai_mdwechat@163.com?subject=[MDWechat] 请简明描述该问题" +
-                    "&body=请按以下步骤填写,不按此填写的邮件可能会被忽略,谢谢!%0d%0a[问题描述] 请描述遇到了什么问题%0d%0a[环境]请写明安卓版本 手机 rom xposed 微信 MDWechat版本%0d%0a[日志]可以传附件\n"
+            val info = "mailto:$email?subject=[MDWechat] 请简明描述该问题" +
+                    "&body=请按以下步骤填写，不按此填写的邮件可能会被忽略，谢谢！%0d%0a[问题描述] 请描述遇到了什么问题%0d%0a[环境] 请写明安卓版本、手机 ROM、Xposed/LSPosed、微信版本%0d%0a[日志] 可以附上 /sdcard/mdwechat/logs/ 目录中的相关日志"
             val uri = Uri.parse(info)
             startActivity(Intent(Intent.ACTION_SENDTO, uri))
         } catch (e: Exception) {
-
+            Toast.makeText(activity, "未找到可用的邮件应用，请改用项目 Issue 或手动发送到 $email", Toast.LENGTH_SHORT).show()
         }
     }
 

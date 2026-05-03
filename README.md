@@ -1,7 +1,7 @@
 MDWechat
 ====
 # 简介
-Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前由 Lincc 维护，维护分支为 `v4.0`。
+Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前维护分支为 `v4.0`。
 
 - 主要适配微信 `8.0.49`
 - 支持的微信版本范围：`6.7.3 - 8.0.49`
@@ -15,14 +15,14 @@ Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前由 L
 5. 构建环境升级到 `AGP 7.1.2 + Gradle 7.5 + Kotlin 1.6.21`，命令行构建需要 `Java 11+`。
 
 # 效果预览
-[![gif_demo](image/demo.gif)](image/demo.gif)
-![main00](image/main00.png)
-![chat00](image/chat00.png)
-![main01](image/main01.png)
-![main02](image/main02.png)
-![main03](image/main03.png)
-![main05](image/main05.png)
-![chat01](image/chat01.png)
+[![gif_demo](https://z3.ax1x.com/2021/03/24/6bOQKJ.gif)](https://imgtu.com/i/6bOQKJ)
+![main00](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/main00.png)
+![chat00](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/chat00.png)
+![main01](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/main01.png)
+![main02](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/main02.png)
+![main03](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/main03.png)
+![main05](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/main05.png)
+![chat01](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/chat01.png)
 
 # 功能
 实现的功能有:
@@ -30,7 +30,7 @@ Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前由 L
 2. 针对 微信8.0 提供 第四页取消沉浸背景显示 的功能 (4.0新增)
 3. 细化设置项并添加4个内置配色方案(4.0新增)
 4. 全局 ActionBar 和 状态栏 颜色修改,支持主界面和聊天页面的沉浸主题(4.0新增)
-5. 自动识别微信深色模式以调整本项目配色方案(3.6新增)
+5. 自动识别微信深色模式以调整MDwechat配色方案(3.6新增)
 6. 主界面 TabLayout Material 化,支持自定义图标
 7. 主界面 4 个页面背景修改
 8. 主界面添加悬浮按钮(FloatingActionButton),支持自定义按钮文本/图标/入口, 4.0支持自定义悬浮按钮点击之后的旋转角度
@@ -47,8 +47,8 @@ Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前由 L
 19. 主界面字体颜色修改(2.0新增)
 
 # 版本支持
-- 支持的微信版本: 6.7.3 - 8.0.49；由于测试不够全面，本项目的某些功能可能对于某些微信版本不生效。若不生效可以升级微信版本或者反馈问题到 Issue 里。
-~~- 本项目 4.0 对于国内版的适配性比较好，play版微信在部分机型/框架上可能出现无法适配的状况。~~(4.1已修复这一部分play版适配)
+- 支持的微信版本: 6.7.3 - 8.0.49；由于测试不够全面，MDWechat 的某些功能可能对于某些微信版本不生效。若不生效可以升级微信版本或者反馈问题到 Issue 里。
+~~- MDWechat(官改) 4.0 对于国内版的适配性比较好，play版微信在部分机型/框架上可能出现无法适配的状况。~~(4.1已修复这一部分play版适配)
 
 # 构建说明
 1. 命令行构建请使用 `Java 11` 到 `Java 17`。
@@ -66,13 +66,6 @@ Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前由 L
 5. 点击最近聊天进入聊天页面后,返回主界面时有几率产生白条, 这时把白条移除屏幕外(比如下拉到小程序界面等)即可消除白条.
 6. 沉浸背景时朋友圈顶栏图片显示错位.
 7. 微信8.0.27之后的聊天气泡更改失效.
-
-# 捐赠
-如果本项目对你有帮助，欢迎支持维护者与原作者：
-
-- Lincc：捐赠方式待补充
-- JoshCai：支付宝 [链接](https://qr.alipay.com/fkx12707x8vvnh6mjpqseb4)，微信赞赏码 `f2f0xQLV4IlGwE3CHY7LelHelT0Uqklc-n9W`
-- Blanke：支付宝 [链接](https://qr.alipay.com/tsx05730go4ditv2dmwia15)，微信赞赏码 `f2f0YjlNObKWk7zwpDQoGtBDBe-Cper5cndi`
 
 # 感谢
 1. [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)

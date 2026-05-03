@@ -5,7 +5,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 class APIManager {
-    private val host = "https://gitee.com/JoshCai/MDWechat/raw/v4.0/"
+    private val host = "https://raw.githubusercontent.com/GIT-LINCC/MDWechat/v4.0/"
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder().build()

@@ -20,9 +20,12 @@
     <string name="text_alipay_red_packet">支付宝领红包</string>
     <string name="summary_alipay_red_packet">每天可领 可用于支付宝捐赠或实体店消费</string>
     <string name="text_donate">向原作者 (Blanke) 捐赠</string>
-    <string name="text_donate_joshcai">向我 (JoshCai) 捐赠</string>
+    <string name="text_donate_lincc">向维护者 (Lincc) 捐赠</string>
+    <string name="text_donate_joshcai">向上一个维护者 (JoshCai) 捐赠</string>
     <string name="key_donate">key_donate</string>
     <string name="key_donate_wechat">key_donate_wechat</string>
+    <string name="key_donate_lincc">key_donate_lincc</string>
+    <string name="key_donate_wechat_lincc">key_donate_wechat_lincc</string>
     <string name="key_donate_joshcai">key_donate_joshcai</string>
     <string name="key_donate_wechat_joshcai">key_donate_wechat_joshcai</string>
     <string name="text_donate_alipay">捐赠(支付宝)</string>
@@ -63,7 +66,7 @@
     <string name="text_chat_group">群聊</string>
     <string name="text_friend_add">添加好友</string>
     <string name="text_app_thank">感谢</string>
-    <string name="text_app_thank_content">感谢 Blankeer@github 开源的 MDwechat, 感谢 hzknm@coolapk 设计的 Logo, 感谢 Gh0u1L5@github 开源的微信巫师, 感谢 weishu 对代码的贡献, 感谢 chouqibao@github 开源的微信深色主题, 感谢 @装睡 提供的精神支持</string>
+    <string name="text_app_thank_content">感谢 Blankeer@github 开源的 MDwechat，感谢 JoshCai 对项目延续维护所做的工作，感谢 hzknm@coolapk 设计的 Logo，感谢 Gh0u1L5@github 开源的微信巫师，感谢 weishu 对代码的贡献，感谢 chouqibao@github 开源的微信深色主题，感谢 @装睡 提供的精神支持</string>
     <string name="key_hook_bubble_tint">key_hook_bubble_tint</string>
     <string name="text_hook_bubble_tint">气泡着色</string>
     <string name="text_hook_bubble_tint_info">可以修改气泡颜色，不包括红包气泡</string>
@@ -201,26 +204,26 @@
     <string name="summary_tab_layout_filtered">若着色则使用副色2.</string>
     <string name="summary_hook_hide_wx_tab">如果TabLayout沉底则默认隐藏</string>
     <string name="key_feedback_email">key_feedback_email</string>
-    <string name="text_feedback_email">给我发邮件反馈</string>
+    <string name="text_feedback_email">给维护者发邮件反馈</string>
     <string name="key_feedback_gitee">key_feedback_gitee</string>
-    <string name="text_feedback_gitee">跳转至码云反馈</string>
-    <string name="text_feedback_email_info">反馈问题请描述问题并提供调试日志,不定时检查回复</string>
+    <string name="text_feedback_gitee">跳转至项目 Issue</string>
+    <string name="text_feedback_email_info">维护者邮箱：lcc.spiritualism@gmail.com，建议反馈时附带日志和环境信息。</string>
     <string name="key_feedback_email_blanke">key_feedback_email_blanke</string>
     <string name="text_feedback_email_blanke">原作者 (blanke) 的邮箱</string>
     <string name="text_feedback_email_blanke_info">blanke.master+mdwechat@gmail.com</string>
     <string name="key_feedback_email_josh_cai">key_feedback_email_josh_cai</string>
-    <string name="text_feedback_email_josh_cai">我 (joshcai) 的邮箱</string>
+    <string name="text_feedback_email_josh_cai">Lincc 的邮箱</string>
     <string name="key_github_screen">key_github_screen</string>
     <string name="text_github_screen">项目地址</string>
     <string name="text_github_screen_info">可以给个star嘛</string>
-    <string name="text_gitee">码云</string>
+    <string name="text_gitee">项目镜像</string>
     <string name="text_github">Github</string>
     <string name="key_github_blanke">key_github_blanke</string>
     <string name="text_github_blanke">原作者 (Blanke) 的 GitHub地址</string>
     <string name="key_gitee_joshcai">key_gitee_joshcai</string>
-    <string name="text_gitee_joshcai">我 (JoshCai) 的 码云地址</string>
+    <string name="text_gitee_joshcai">上一个维护者 (JoshCai) 的 Gitee 地址</string>
     <string name="key_github_joshcai">key_github_joshcai</string>
-    <string name="text_github_joshcai">我 (JoshCai) 的 GitHub地址</string>
+    <string name="text_github_joshcai">本项目的 GitHub 地址</string>
     <string name="key_hook_hide_wx_tab_2">key_hook_hide_wx_tab_2</string>
     <string name="text_hook_hide_wx_tab_2">隐藏发现页面</string>
     <string name="key_hook_hide_wx_tab_3">key_hook_hide_wx_tab_3</string>
@@ -278,12 +281,12 @@
     <string name="text_update">更新</string>
     <string name="key_download_wechat_config">key_download_wechat_config</string>
     <string name="text_download_wechat_config">下载共享的微信配置文件</string>
-    <string name="text_download_wechat_config_info">上面生成失败的可以尝试下载，配置文件作者维护，更新可能不及时，欢迎贡献配置文件(发邮件给作者)</string>
+    <string name="text_download_wechat_config_info">上面生成失败的可以尝试下载，配置文件由本项目维护，更新可能不及时，欢迎贡献配置文件或反馈问题。</string>
     <string name="text_brief">简要设置</string>
     <string name="text_wechat_config_settings">微信适配文件</string>
     <string name="text_feedback_donate_settings">反馈和捐赠</string>
     <string name="text_about_settings">更多信息、查看支持版本</string>
-    <string name="summary_about_settings">捐赠 / 查看交流群等</string>
+    <string name="summary_about_settings">捐赠 / 项目相关信息</string>
     <string name="key_feedback_wechat">key_feedback_wechat</string>
     <string name="text_feedback_wechat">微信交流群</string>
     <string name="text_feedback_group">加入交流群</string>
@@ -292,14 +295,14 @@
     <!--    <string name="key_help_settings">key_help_settings</string>-->
     <!--    <string name="text_help_settings">帮助和教程</string>-->
     <string name="text_help_float_button">悬浮按钮</string>
-    <!--    <string name="text_help_icon">图标和背景</string>-->
-    <!--    <string name="text_help_bubble">气泡</string>-->
+    <string name="text_help_icon">图标和背景</string>
+    <string name="text_help_bubble">气泡</string>
     <!--    <string name="key_help_float_button">key_help_float_button</string>-->
     <!--    <string name="key_help_icon">key_help_icon</string>-->
     <!--    <string name="key_help_bubble">key_help_bubble</string>-->
     <string name="text_app_tips">软件使用提示</string>
     <string name="text_app_desc">本软件请在微信的用户条款下使用，遵守相关法律和微信规定，使用本软件造成的一切后果，与软件和开发者无关，如对上述有异议或疑问，请立即卸载此软件！</string>
-    <string name="text_app_donate">你已使用「MDWechat」%s，在使用过程中有任何问题欢迎到码云讨论。\n如果你觉得「MDWechat」很好用，是否愿意支持下作者，让我更有动力完善维护这个软件呢？</string>
+    <string name="text_app_donate">你已使用「本项目」%s，在使用过程中有任何问题欢迎到项目页面反馈。\n如果你觉得「本项目」很好用，是否愿意支持一下维护者和原作者，让项目可以持续维护下去呢？</string>
     <string name="text_app_know">我已知晓</string>
     <string name="key_feedback_group">key_feedback_group</string>
 
@@ -308,7 +311,7 @@
     <string name="summary_hook_scheme_dark">开启后强制微信使用暗色系主题(需要微信7.0.10以上)</string>
     <string name="key_hook_night_mode">key_hook_night_mode</string>
     <string name="text_hook_night_mode">自动切换暗色系</string>
-    <string name="summary_hook_night_mode">当微信切换为深色模式时，自动切换 MDWechat 主题为暗色系。\n需要微信7.0.10以上</string>
+    <string name="summary_hook_night_mode">当微信切换为深色模式时，自动切换本项目主题为暗色系。\n需要微信7.0.10以上</string>
     <string name="text_main_page_color">主界面内容字体颜色</string>
     <string name="other_bubble_settings">其他设置请前往「配色方案 -> 聊天气泡」</string>
 
@@ -349,7 +352,7 @@
     <string name="key_Q_A">key_Q_A</string>
     <string name="text_Q_A">常见问题</string>
     <string name="key_releases">key_releases</string>
-    <string name="text_releases">查看最新版本 / 更新日志</string>
+    <string name="text_releases">查看本项目版本 / 更新日志</string>
 
     <string name="key_select_bg">key_select_bg</string>
     <string name="text_select_bg">选择背景图</string>
@@ -394,10 +397,10 @@
     <string name="text_reset">重置后不可恢复，如有自定义内容建议先做备份</string>
     <string name="test">试验</string>
     <string name="latest_wechat_version">8.0.49</string>
-    <string name="app_name_version">version 4.2.6</string>
+    <string name="app_name_version">version 4.2.7</string>
     <string name="key_joshcai_info">key_joshcai_info</string>
     <string name="josh_cai_info_outdated">检测到不兼容的微信版本（当前版本%s，最高适配%s)</string>
     <string name="josh_cai_info_outdated_suffix">\n~~佛系更新~~\n 不适配内测版本！不要再问了！\n\n在不兼容的微信版本中使用本软件可能会出现一些bug，严重时可能导致封号等后果。\n\n本软件请在微信的用户条款下使用，遵守相关法律和微信规定，使用本软件造成的一切后果，与软件和开发者无关，如对上述有异议或疑问，请立即卸载此软件。</string>
     <string name="josh_cai_info">\n！！！！！！！！！！！！！！！！！！！！！\n！！微信8.0.27之后的聊天气泡修改已失效！！\n！！！！！！！！！！！！！！！！！！！！！\n\n适配微信 %s (当前微信版本:%s)\n 如果微信版本与适配版本不同，可能有些地方并没有适配。（并没有测试所有的微信版本，摆烂中）\n\n 新增功能: 恢复微信8.0.7以上的夜间模式功能\n沉浸模式的分辨率设置自动适应全面屏的刘海</string>
-    <string name="josh_cai_info2">\t\t\t\tHello 我是 JoshCai。由于原作者 Blankeer@github 未更新，所以我将其在github上开源的代码进行维护和二次开发，使其能够适配较新的微信。\n\t\t\t\t保留app内向原作者捐赠的途径，如果大家喜欢本软件也可以请他喝杯咖啡。</string>
+    <string name="josh_cai_info2">\t\t\t\tHello 我是 Lincc。本项目基于 Blankeer@github 开源的 MDWechat 继续维护，并在已有工作的基础上适配较新的微信版本。\n\t\t\t\t应用内保留了向原作者 Blanke 和后续维护者 JoshCai 的捐赠方式；如果你喜欢本项目，也欢迎支持当前维护者。</string>
 </resources>

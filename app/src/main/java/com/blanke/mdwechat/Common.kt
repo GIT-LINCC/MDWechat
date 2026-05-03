@@ -18,6 +18,7 @@ object Common {
     val CONFIG_DIR = "config"
     val CONFIG_WECHAT_DIR = "config" + File.separator + "wechat"
     val CONFIG_VIEW_DIR = "config" + File.separator + "view"
+    val HELP_DIR = "help"
 
     //    val CONFIG_readme_DIR = "config" + File.separator + "readme"
     val LOGS_DIR = "logs"

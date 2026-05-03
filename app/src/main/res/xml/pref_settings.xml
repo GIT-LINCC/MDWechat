@@ -56,6 +56,16 @@
         </PreferenceScreen>
         <PreferenceScreen
             android:summary="@string/summary_donate"
+            android:title="@string/text_donate_lincc">
+            <Preference
+                android:key="@string/key_donate_lincc"
+                android:title="@string/text_donate_alipay" />
+            <Preference
+                android:key="@string/key_donate_wechat_lincc"
+                android:title="@string/text_donate_wechat" />
+        </PreferenceScreen>
+        <PreferenceScreen
+            android:summary="@string/summary_donate"
             android:title="@string/text_donate_joshcai">
             <Preference
                 android:key="@string/key_donate_joshcai"
@@ -69,10 +79,6 @@
         <Preference
             android:key="@string/key_releases"
             android:title="@string/text_releases" />
-        <Preference
-            android:key="@string/key_feedback_group"
-            android:summary="@string/text_feedback_group_info"
-            android:title="@string/text_feedback_group" />
 
         <PreferenceScreen
             android:key="@string/key_feedback_email"
@@ -95,18 +101,18 @@
             android:key="@string/key_github_screen"
             android:summary="@string/text_github_screen_info"
             android:title="@string/text_github_screen">
+            <PreferenceCategory android:title="@string/text_github">
+                <Preference
+                    android:key="@string/key_github_joshcai"
+                    android:title="@string/text_github_joshcai" />
+                <Preference
+                    android:key="@string/key_github_blanke"
+                    android:title="@string/text_github_blanke" />
+            </PreferenceCategory>
             <PreferenceCategory android:title="@string/text_gitee">
                 <Preference
                     android:key="@string/key_gitee_joshcai"
                     android:title="@string/text_gitee_joshcai" />
-            </PreferenceCategory>
-            <PreferenceCategory android:title="@string/text_github">
-                <Preference
-                    android:key="@string/key_github_blanke"
-                    android:title="@string/text_github_blanke" />
-                <Preference
-                    android:key="@string/key_github_joshcai"
-                    android:title="@string/text_github_joshcai" />
             </PreferenceCategory>
 
         </PreferenceScreen>

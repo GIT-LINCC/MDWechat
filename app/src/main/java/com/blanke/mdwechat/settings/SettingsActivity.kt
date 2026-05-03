@@ -111,7 +111,7 @@ class SettingsActivity : Activity() {
                         getSharedPreferences("newestVersion", Context.MODE_PRIVATE).edit().putInt("ignoredVersion", data.versionCode.toInt()).apply()
                     }
                     .setPositiveButton(R.string.text_update) { _, which ->
-                        ContextCompat.startActivity(activity, Intent(Intent.ACTION_VIEW, Uri.parse("https://gitee.com/JoshCai/MDWechat/releases/${data.version}")), null)
+                        ContextCompat.startActivity(activity, Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/GIT-LINCC/MDWechat/releases/tag/${data.version}")), null)
                     }
                     .show()
         }
@@ -159,7 +159,7 @@ class SettingsActivity : Activity() {
         thread {
             FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.CONFIG_WECHAT_DIR)
             FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.CONFIG_VIEW_DIR)
-//            FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.CONFIG_readme_DIR)
+            FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.HELP_DIR)
             FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.ICON_DIR)
             copySharedPrefences()
             Handler(Looper.getMainLooper()).post {
