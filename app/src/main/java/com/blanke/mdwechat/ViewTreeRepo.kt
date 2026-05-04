@@ -747,6 +747,7 @@ object ViewTreeRepo {
                 mapOf("headView" to intArrayOf(1, 0, 0, 0),
                         "nickNameView" to intArrayOf(3, 0, 1, 0, 0),
                         "wechatTextView" to intArrayOf(3, 0, 1, 1, 0),
+                        "statusSpacerView" to intArrayOf(4),
                         "q1" to intArrayOf(5, 0)
                 ),
                 ViewTreeItem(CC.RelativeLayout.name, arrayOf(
@@ -775,6 +776,7 @@ object ViewTreeRepo {
                 mapOf("headView" to intArrayOf(1, 0, 0, 0),
                         "nickNameView" to intArrayOf(3, 0, 1, 0, 0),
                         "wechatTextView" to intArrayOf(3, 0, 1, 1, 0),
+                        "statusSpacerView" to intArrayOf(4),
                         "q1" to intArrayOf(5, 0)
                 ),
                 ViewTreeItem(CC.RelativeLayout.name, arrayOf(
@@ -797,6 +799,38 @@ object ViewTreeRepo {
                                 ViewTreeItem(CC.View.name),
                                 ViewTreeItem(CC.RelativeLayout.name)
                         )))))
+    }
+
+    val SettingAvatarView_8_0_49: ViewTree by lazy {
+        ViewTree(
+                mapOf("headView" to intArrayOf(0),
+                        "nickNameView" to intArrayOf(0, 0, 1, 0, 0),
+                        "wechatTextView" to intArrayOf(0, 0, 1, 1, 0),
+                        "statusSpacerView" to intArrayOf(1),
+                        "q1" to intArrayOf(1, 0)
+                ),
+                ViewTreeItem(CC.RelativeLayout.name, arrayOf(
+                        ViewTreeItem(CC.LinearLayout.name, arrayOf(
+                                ViewTreeItem(CC.RelativeLayout.name, arrayOf(
+                                        ViewTreeItem(CC.ImageView.name),
+                                        ViewTreeItem(CC.LinearLayout.name, arrayOf(
+                                                ViewTreeItem(CC.LinearLayout.name, arrayOf(
+                                                        ViewTreeItem(CC.View.name))),
+                                                ViewTreeItem(CC.LinearLayout.name, arrayOf(
+                                                        ViewTreeItem(CC.TextView.name),
+                                                        ViewTreeItem(CC.RelativeLayout.name, arrayOf(
+                                                                ViewTreeItem(CC.ImageView.name),
+                                                                ViewTreeItem(CC.ImageView.name)
+                                                        ))
+                                                ))
+                                        ))
+                                ))
+                        )),
+                        ViewTreeItem(CC.RelativeLayout.name, arrayOf(
+                                ViewTreeItem(CC.ImageView.name),
+                                ViewTreeItem(CC.RelativeLayout.name)
+                        ))
+                )))
     }
     //endregion
     //endregion

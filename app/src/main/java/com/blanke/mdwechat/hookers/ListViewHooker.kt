@@ -6,8 +6,10 @@ import android.graphics.PorterDuff
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewParent
 import android.widget.*
 import com.blanke.mdwechat.*
 import com.blanke.mdwechat.WeChatHelper.createItemRippleDrawable
@@ -17,13 +19,20 @@ import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.hookers.base.Hooker
 import com.blanke.mdwechat.hookers.base.HookerProvider
 import com.blanke.mdwechat.hookers.main.BackgroundImageHook
+import com.blanke.mdwechat.util.ColorUtils
 import com.blanke.mdwechat.util.ConversationRipplePolicy
 import com.blanke.mdwechat.util.LogUtil
+import com.blanke.mdwechat.util.MainPageRippleGesturePolicy
+import com.blanke.mdwechat.util.MainPageRipplePolicy
 import com.blanke.mdwechat.util.NightModeUtils
+import com.blanke.mdwechat.util.SettingsHeaderBackgroundPolicy
+import com.blanke.mdwechat.util.SettingsHeaderStyleResolver
 import com.blanke.mdwechat.util.ViewTreeUtils
 import com.blanke.mdwechat.util.ViewUtils
+import com.blanke.mdwechat.util.waitInvoke
 import com.gcssloop.widget.RCRelativeLayout
 import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import com.blanke.mdwechat.ViewTreeRepoThisVersion as VTTV
 
@@ -35,6 +44,14 @@ object ListViewHooker : HookerProvider {
     private const val keyConversationBaseBackground = "mdwechat_conversation_base_background"
     private const val keyConversationColorBackgroundSnapshot = "mdwechat_conversation_color_background_snapshot"
     private const val keyConversationOverlayRipple = "mdwechat_conversation_overlay_ripple"
+    private const val keyMainPageOverlayEnabled = "mdwechat_main_page_overlay_enabled"
+    private const val keyMainPageOverlayRipple = "mdwechat_main_page_overlay_ripple"
+    private const val keyMainPageResetRunnable = "mdwechat_main_page_reset_runnable"
+    private const val keyMainPageActiveTarget = "mdwechat_main_page_active_target"
+    private const val keyMainPageListInteraction = "mdwechat_main_page_list_interaction"
+    private const val keyMainPageListResetRunnable = "mdwechat_main_page_list_reset_runnable"
+    private const val absListViewTouchModeRest = -1
+    private const val absListViewInvalidPosition = -1
     private val conversationPressedState = intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed)
     private val conversationEnabledState = intArrayOf(android.R.attr.state_enabled)
 
@@ -48,7 +65,7 @@ object ListViewHooker : HookerProvider {
         }
 
     private val shouldPreserveWeChatItemBackground: Boolean
-        get() = WechatGlobal.wxVersion!! >= Version("8.0.49")
+        get() = MainPageRipplePolicy.shouldPreserveNativeItemBackground(WechatGlobal.wxVersion)
 
     private val isHookTextColor: Boolean
         get() {
@@ -56,7 +73,7 @@ object ListViewHooker : HookerProvider {
         }
 
     override fun provideStaticHookers(): List<Hooker>? {
-        return listOf(listViewHook)
+        return listOf(listViewHook, mainPageItemRippleHook)
     }
 
     private fun newTransparentDrawable(): Drawable = ColorDrawable(Color.TRANSPARENT)
@@ -72,9 +89,55 @@ object ListViewHooker : HookerProvider {
         return view.javaClass.name == VTTV.ConversationListViewItem.item.clazz
     }
 
+    private fun isUsingOverlayMainPageRipple(): Boolean {
+        return MainPageRipplePolicy.shouldUseOverlayRipple(
+                WechatGlobal.wxVersion,
+                Build.VERSION.SDK_INT
+        )
+    }
+
+    private fun isMainPageOverlayRippleTarget(view: View): Boolean {
+        return XposedHelpers.getAdditionalInstanceField(view, keyMainPageOverlayEnabled) == true
+    }
+
+    private fun findMainPageOverlayRippleAncestor(view: View): View? {
+        var current: View? = view
+        while (current != null) {
+            if (isMainPageOverlayRippleTarget(current)) {
+                return current
+            }
+            current = current.parent as? View
+        }
+        return null
+    }
+
+    private fun shouldSuppressNativeMainPageInteraction(view: View): Boolean {
+        if (!isUsingOverlayMainPageRipple()) {
+            return false
+        }
+        return findMainPageOverlayRippleAncestor(view) != null
+    }
+
+    fun resetRecycledMainPageRippleState(view: View) {
+        cancelMainPageItemReset(view)
+        removeMainPageOverlayRipple(view)
+        unregisterActiveMainPageRippleTarget(view)
+        XposedHelpers.removeAdditionalInstanceField(view, keyMainPageOverlayEnabled)
+        clearInteractiveState(view)
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                resetRecycledMainPageRippleState(view.getChildAt(i))
+            }
+        }
+    }
+
     fun prepareReusableItemView(view: View) {
         if (WechatGlobal.wxVersion!! < Version("8.0.49")) {
             return
+        }
+        if (isMainPageOverlayRippleTarget(view)) {
+            cancelMainPageItemReset(view)
+            removeMainPageOverlayRipple(view)
         }
         if (isUsingOverlayConversationRipple() && isConversationItemView(view)) {
             clearConversationRowColorBackgroundSnapshots(view)
@@ -96,6 +159,72 @@ object ListViewHooker : HookerProvider {
                 prepareReusableItemView(view.getChildAt(i))
             }
         }
+    }
+
+    private fun applyMainPageItemRipple(view: View) {
+        if (!HookConfig.is_hook_ripple) {
+            XposedHelpers.removeAdditionalInstanceField(view, keyMainPageOverlayEnabled)
+            SettingsHooker.refreshSettingsStatusOverlayFromListChild(view)
+            return
+        }
+        if (isUsingOverlayMainPageRipple()) {
+            XposedHelpers.setAdditionalInstanceField(view, keyMainPageOverlayEnabled, true)
+            SettingsHooker.refreshSettingsStatusOverlayFromListChild(view)
+            return
+        }
+        XposedHelpers.removeAdditionalInstanceField(view, keyMainPageOverlayEnabled)
+        view.background = if (MainPageRipplePolicy.shouldWrapRootBackground(WechatGlobal.wxVersion, Build.VERSION.SDK_INT)) {
+            WeChatHelper.wrapItemBackgroundWithRipple(copyDrawable(view.background, view))
+        } else if (shouldPreserveWeChatItemBackground && view.background != null) {
+            WeChatHelper.wrapItemBackgroundWithRipple(copyDrawable(view.background, view))
+        } else {
+            createItemRippleDrawable()
+        }
+        SettingsHooker.refreshSettingsStatusOverlayFromListChild(view)
+    }
+
+    private fun findParentAbsListView(view: View): AbsListView? {
+        var current: ViewParent? = view.parent
+        while (current is View) {
+            val currentView = current
+            if (currentView is AbsListView) {
+                return currentView
+            }
+            current = currentView.getParent()
+        }
+        return null
+    }
+
+    private fun registerActiveMainPageRippleTarget(view: View) {
+        findParentAbsListView(view)?.let {
+            XposedHelpers.setAdditionalInstanceField(it, keyMainPageActiveTarget, view)
+            XposedHelpers.setAdditionalInstanceField(it, keyMainPageListInteraction, true)
+        }
+    }
+
+    private fun unregisterActiveMainPageRippleTarget(view: View) {
+        findParentAbsListView(view)?.let {
+            val current = XposedHelpers.getAdditionalInstanceField(it, keyMainPageActiveTarget) as? View
+            if (current === view) {
+                XposedHelpers.removeAdditionalInstanceField(it, keyMainPageActiveTarget)
+            }
+        }
+    }
+
+    private fun getActiveMainPageRippleTarget(listView: AbsListView): View? {
+        return XposedHelpers.getAdditionalInstanceField(listView, keyMainPageActiveTarget) as? View
+    }
+
+    private fun clearActiveMainPageRippleTarget(listView: AbsListView) {
+        XposedHelpers.removeAdditionalInstanceField(listView, keyMainPageActiveTarget)
+    }
+
+    private fun hasMainPageListInteraction(listView: AbsListView): Boolean {
+        return XposedHelpers.getAdditionalInstanceField(listView, keyMainPageListInteraction) == true
+    }
+
+    private fun clearMainPageListInteraction(listView: AbsListView) {
+        XposedHelpers.removeAdditionalInstanceField(listView, keyMainPageListInteraction)
     }
 
     private fun cloneStatefulBackgroundIfNeeded(view: View) {
@@ -337,6 +466,227 @@ object ListViewHooker : HookerProvider {
         }
     }
 
+    private fun attachMainPageOverlayRipple(view: View): Drawable {
+        val existing = XposedHelpers.getAdditionalInstanceField(view, keyMainPageOverlayRipple) as? Drawable
+        if (existing != null) {
+            existing.setBounds(0, 0, view.width, view.height)
+            return existing
+        }
+        val overlayRipple = createItemRippleDrawable().mutate()
+        overlayRipple.setBounds(0, 0, view.width, view.height)
+        view.overlay.add(overlayRipple)
+        XposedHelpers.setAdditionalInstanceField(view, keyMainPageOverlayRipple, overlayRipple)
+        return overlayRipple
+    }
+
+    private fun removeMainPageOverlayRipple(view: View) {
+        val overlayRipple = XposedHelpers.getAdditionalInstanceField(view, keyMainPageOverlayRipple) as? Drawable
+                ?: return
+        try {
+            view.overlay.remove(overlayRipple)
+        } catch (_: Throwable) {
+        }
+        XposedHelpers.removeAdditionalInstanceField(view, keyMainPageOverlayRipple)
+        view.invalidate()
+    }
+
+    private fun showMainPageItemRipple(view: View, hotspotX: Float, hotspotY: Float) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return
+        }
+        removeMainPageOverlayRipple(view)
+        val overlayRipple = attachMainPageOverlayRipple(view)
+        overlayRipple.setBounds(0, 0, view.width, view.height)
+        overlayRipple.setHotspot(
+                hotspotX.coerceIn(0f, view.width.toFloat()),
+                hotspotY.coerceIn(0f, view.height.toFloat())
+        )
+        overlayRipple.state = conversationPressedState
+        view.invalidate()
+    }
+
+    private fun releaseMainPageItemRipple(view: View) {
+        val overlayRipple = XposedHelpers.getAdditionalInstanceField(view, keyMainPageOverlayRipple) as? Drawable
+                ?: return
+        overlayRipple.setBounds(0, 0, view.width, view.height)
+        overlayRipple.state = conversationEnabledState
+        view.invalidate()
+    }
+
+    private fun cancelMainPageItemReset(view: View) {
+        val pending = XposedHelpers.getAdditionalInstanceField(view, keyMainPageResetRunnable) as? Runnable ?: return
+        view.removeCallbacks(pending)
+        XposedHelpers.removeAdditionalInstanceField(view, keyMainPageResetRunnable)
+    }
+
+    private fun clearMainPageInteractionState(view: View) {
+        clearInteractiveState(view)
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                clearMainPageInteractionState(view.getChildAt(i))
+            }
+        }
+    }
+
+    private fun clearVisibleMainPageInteractionState(listView: AbsListView) {
+        for (i in 0 until listView.childCount) {
+            clearMainPageInteractionState(listView.getChildAt(i))
+        }
+    }
+
+    private fun clearMainPageParentInteractionState(view: View, stopAt: View? = null) {
+        var current = view.parent as? View
+        while (current != null && current !== stopAt) {
+            clearInteractiveState(current)
+            current = current.parent as? View
+        }
+    }
+
+    private fun cancelMainPageListReset(listView: AbsListView) {
+        val pending = XposedHelpers.getAdditionalInstanceField(listView, keyMainPageListResetRunnable) as? Runnable ?: return
+        listView.removeCallbacks(pending)
+        XposedHelpers.removeAdditionalInstanceField(listView, keyMainPageListResetRunnable)
+    }
+
+    private fun setIntFieldIfPresent(instance: Any, fieldName: String, value: Int) {
+        try {
+            XposedHelpers.setIntField(instance, fieldName, value)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun setLongFieldIfPresent(instance: Any, fieldName: String, value: Long) {
+        try {
+            XposedHelpers.setLongField(instance, fieldName, value)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun removeListViewCallbackIfPresent(listView: AbsListView, fieldName: String) {
+        try {
+            val callback = XposedHelpers.getObjectField(listView, fieldName) as? Runnable ?: return
+            listView.removeCallbacks(callback)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun clearAbsListViewPendingCallbacks(listView: AbsListView) {
+        listOf(
+                "mPendingCheckForTap",
+                "mPendingCheckForLongPress",
+                "mPendingCheckForKeyLongPress",
+                "mTouchModeReset",
+                "mPerformClick"
+        ).forEach {
+            removeListViewCallbackIfPresent(listView, it)
+        }
+    }
+
+    private fun clearAbsListViewInternalState(listView: AbsListView) {
+        clearAbsListViewPendingCallbacks(listView)
+        setIntFieldIfPresent(listView, "mTouchMode", absListViewTouchModeRest)
+        setIntFieldIfPresent(listView, "mLastTouchMode", absListViewTouchModeRest)
+        setIntFieldIfPresent(listView, "mMotionPosition", absListViewInvalidPosition)
+        setIntFieldIfPresent(listView, "mSelectorPosition", absListViewInvalidPosition)
+        setIntFieldIfPresent(listView, "mResurrectToPosition", absListViewInvalidPosition)
+        setIntFieldIfPresent(listView, "mSelectedPosition", absListViewInvalidPosition)
+        setIntFieldIfPresent(listView, "mNextSelectedPosition", absListViewInvalidPosition)
+        setIntFieldIfPresent(listView, "mOldSelectedPosition", absListViewInvalidPosition)
+        setLongFieldIfPresent(listView, "mSelectedRowId", Long.MIN_VALUE)
+        setLongFieldIfPresent(listView, "mNextSelectedRowId", Long.MIN_VALUE)
+        setLongFieldIfPresent(listView, "mOldSelectedRowId", Long.MIN_VALUE)
+        try {
+            listView.clearChoices()
+        } catch (_: Throwable) {
+        }
+        try {
+            XposedHelpers.callMethod(listView, "hideSelector")
+        } catch (_: Throwable) {
+        }
+        try {
+            XposedHelpers.callMethod(listView, "setSelectedPositionInt", absListViewInvalidPosition)
+        } catch (_: Throwable) {
+        }
+        try {
+            XposedHelpers.callMethod(listView, "setNextSelectedPositionInt", absListViewInvalidPosition)
+        } catch (_: Throwable) {
+        }
+        try {
+            XposedHelpers.callMethod(listView, "dispatchSetPressed", false)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun forceResetMainPageList(listView: AbsListView) {
+        clearVisibleMainPageInteractionState(listView)
+        clearAbsListViewInternalState(listView)
+        clearInteractiveState(listView)
+        clearMainPageParentInteractionState(listView)
+        listView.selector?.state = intArrayOf()
+        listView.selector?.jumpToCurrentState()
+        try {
+            XposedHelpers.callMethod(listView, "clearPressedItem")
+        } catch (_: Throwable) {
+        }
+        try {
+            XposedHelpers.callMethod(listView, "setPressed", false)
+        } catch (_: Throwable) {
+        }
+        listView.invalidateViews()
+        listView.invalidate()
+    }
+
+    private fun scheduleMainPageListReset(listView: AbsListView, delayMillis: Long) {
+        cancelMainPageListReset(listView)
+        val runnable = Runnable {
+            forceResetMainPageList(listView)
+            XposedHelpers.removeAdditionalInstanceField(listView, keyMainPageListResetRunnable)
+        }
+        XposedHelpers.setAdditionalInstanceField(listView, keyMainPageListResetRunnable, runnable)
+        if (delayMillis > 0) {
+            listView.postDelayed(runnable, delayMillis)
+        } else {
+            listView.post(runnable)
+        }
+    }
+
+    private fun resetMainPageItemRipple(view: View) {
+        cancelMainPageItemReset(view)
+        removeMainPageOverlayRipple(view)
+        unregisterActiveMainPageRippleTarget(view)
+        clearMainPageInteractionState(view)
+        findParentAbsListView(view)?.let {
+            forceResetMainPageList(it)
+        }
+    }
+
+    private fun scheduleMainPageItemReset(view: View, delayMillis: Long) {
+        cancelMainPageItemReset(view)
+        val runnable = Runnable {
+            resetMainPageItemRipple(view)
+            XposedHelpers.removeAdditionalInstanceField(view, keyMainPageResetRunnable)
+        }
+        XposedHelpers.setAdditionalInstanceField(view, keyMainPageResetRunnable, runnable)
+        if (delayMillis > 0) {
+            view.postDelayed(runnable, delayMillis)
+        } else {
+            view.post(runnable)
+        }
+    }
+
+    private fun shouldResetMainPageRippleFromRawPoint(view: View, rawX: Float, rawY: Float): Boolean {
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        return MainPageRippleGesturePolicy.shouldResetFromRawPoint(
+                rawX,
+                rawY,
+                location[0],
+                location[1],
+                view.width,
+                view.height
+        )
+    }
+
     private val listViewHook = Hooker {
         XposedHelpers.findAndHookMethod(AbsListView::class.java, "setSelector", Drawable::class.java, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam?) {
@@ -352,6 +702,7 @@ object ListViewHooker : HookerProvider {
                     if (tmp != null) {
                         return
                     }
+                    resetRecycledMainPageRippleState(view)
 
 
                     // 按照使用频率重排序
@@ -1130,15 +1481,15 @@ object ListViewHooker : HookerProvider {
                                     this.backgroundTintList = ColorStateList.valueOf(NightModeUtils.colorTip)
                                     if (this is TextView) this.setTextColor(HookConfig.get_color_tip_num)
                                 }
+                        applyMainPageItemRipple(view)
                     }
                     // 设置 头像
-                    else if (ViewTreeUtils.equals(VTTV.SettingAvatarView.item, view)) {
+                    else if (ViewTreeUtils.equals(VTTV.SettingAvatarView.item, view) || isSettingsHeaderRowView(view)) {
                         view.background = drawableTransparent
                         LogUtil.logOnlyOnce("ListViewHooker.SettingAvatarView")
 
 //                        微信号
-                        ViewUtils.getChildView1(view, VTTV.SettingAvatarView.treeStacks["wechatTextView"])?.apply {
-                            this as TextView
+                        (findSettingsHeaderViewByResourceName(view, "ouv") as? TextView)?.apply {
                             if (this.text.contains(": ") || this.text.contains("：")) {
 
                                 //隐藏微信号
@@ -1159,13 +1510,21 @@ object ListViewHooker : HookerProvider {
                                 //微信号颜色
                                 if (isHookTextColor) {
                                     this.setTextColor(titleTextColor)
-                                    ViewUtils.getChildView1(view, VTTV.SettingAvatarView.treeStacks["nickNameView"])?.apply {
-                                        XposedHelpers.callMethod(this, "setTextColor", titleTextColor)
+                                    findSettingsHeaderViewByResourceName(view, "kbb")?.apply {
+                                        try {
+                                            XposedHelpers.callMethod(this, "setTextColor", titleTextColor)
+                                        } catch (_: Throwable) {
+                                            if (this is TextView) {
+                                                this.setTextColor(titleTextColor)
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
-                        if (WechatGlobal.wxVersion!! >= Version("8.0.0")) {
+                        if (applyUnifiedSettingsHeaderBackground(view)) {
+                            // Unified background already applies the row ripple target.
+                        } else if (WechatGlobal.wxVersion!! >= Version("8.0.0")) {
                             if (!HookConfig.is_settings_page_transparent) {
                                 VTTV.SettingAvatarView.treeStacks["headView"]?.apply {
                                     ViewUtils.getChildView1(view, this)?.apply {
@@ -1200,10 +1559,12 @@ object ListViewHooker : HookerProvider {
                                     }
                                 }
                             }
+                            applyMainPageItemRipple(view)
                         } else {
                             VTTV.SettingAvatarView.treeStacks["headView"]?.apply {
                                 ViewUtils.getChildView1(view, this)?.background = drawableTransparent
                             }
+                            applyMainPageItemRipple(view)
                         }
                     }
                     // (7.0.7 以上) 下拉小程序框
@@ -1276,6 +1637,296 @@ object ListViewHooker : HookerProvider {
         })
     }
 
+    private val mainPageItemRippleHook = Hooker {
+        XposedBridge.hookAllMethods(AbsListView::class.java, "dispatchTouchEvent", object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam?) {
+                if (!isUsingOverlayMainPageRipple()) {
+                    return
+                }
+                val listView = param?.thisObject as? AbsListView ?: return
+                val event = param.args[0] as? MotionEvent ?: return
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    cancelMainPageListReset(listView)
+                }
+                val target = getActiveMainPageRippleTarget(listView)
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_MOVE -> {
+                        if (target != null && shouldResetMainPageRippleFromRawPoint(target, event.rawX, event.rawY)) {
+                            resetMainPageItemRipple(target)
+                            clearActiveMainPageRippleTarget(listView)
+                            scheduleMainPageListReset(listView, 120L)
+                        }
+                    }
+                    MotionEvent.ACTION_UP,
+                    MotionEvent.ACTION_CANCEL -> {
+                        forceResetMainPageList(listView)
+                        clearActiveMainPageRippleTarget(listView)
+                        clearMainPageListInteraction(listView)
+                        scheduleMainPageListReset(listView, 180L)
+                    }
+                }
+                if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    return
+                }
+                if (event.actionMasked == MotionEvent.ACTION_MOVE && getActiveMainPageRippleTarget(listView) == null && hasMainPageListInteraction(listView)) {
+                    forceResetMainPageList(listView)
+                    scheduleMainPageListReset(listView, 120L)
+                }
+            }
+        })
+        XposedBridge.hookAllMethods(AbsListView::class.java, "onTouchEvent", object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam?) {
+                if (!isUsingOverlayMainPageRipple()) {
+                    return
+                }
+                val listView = param?.thisObject as? AbsListView ?: return
+                if (!hasMainPageListInteraction(listView)) {
+                    return
+                }
+                val event = param.args[0] as? MotionEvent ?: return
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_UP,
+                    MotionEvent.ACTION_CANCEL -> {
+                        forceResetMainPageList(listView)
+                        clearActiveMainPageRippleTarget(listView)
+                        clearMainPageListInteraction(listView)
+                        scheduleMainPageListReset(listView, 180L)
+                    }
+                }
+            }
+        })
+        XposedBridge.hookAllMethods(CC.View, "dispatchTouchEvent", object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam?) {
+                if (!isUsingOverlayMainPageRipple()) {
+                    return
+                }
+                val view = param?.thisObject as? View ?: return
+                if (!isMainPageOverlayRippleTarget(view)) {
+                    return
+                }
+                val event = param.args[0] as? MotionEvent ?: return
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        cancelMainPageItemReset(view)
+                        registerActiveMainPageRippleTarget(view)
+                        showMainPageItemRipple(view, event.x, event.y)
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (MainPageRippleGesturePolicy.shouldResetFromLocalPoint(
+                                        event.x,
+                                        event.y,
+                                        view.width,
+                                        view.height
+                                )) {
+                            resetMainPageItemRipple(view)
+                        }
+                    }
+                }
+            }
+
+            override fun afterHookedMethod(param: MethodHookParam?) {
+                if (!isUsingOverlayMainPageRipple()) {
+                    return
+                }
+                val view = param?.thisObject as? View ?: return
+                if (!isMainPageOverlayRippleTarget(view)) {
+                    return
+                }
+                val event = param.args[0] as? MotionEvent ?: return
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_UP -> {
+                        releaseMainPageItemRipple(view)
+                        scheduleMainPageItemReset(view, 220L)
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        resetMainPageItemRipple(view)
+                    }
+                }
+            }
+        })
+        XposedHelpers.findAndHookMethod(CC.View, "setPressed", CC.Boolean, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam?) {
+                val view = param?.thisObject as? View ?: return
+                val pressed = param.args[0] as? Boolean ?: return
+                if (!pressed || !shouldSuppressNativeMainPageInteraction(view)) {
+                    return
+                }
+                param.args[0] = false
+            }
+        })
+        XposedHelpers.findAndHookMethod(CC.View, "setSelected", CC.Boolean, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam?) {
+                val view = param?.thisObject as? View ?: return
+                val selected = param.args[0] as? Boolean ?: return
+                if (!selected || !shouldSuppressNativeMainPageInteraction(view)) {
+                    return
+                }
+                param.args[0] = false
+            }
+        })
+    }
+
+    private fun applyUnifiedSettingsHeaderBackground(view: View): Boolean {
+        if (!SettingsHeaderBackgroundPolicy.shouldUseUnifiedHeaderBackground(
+                        WechatGlobal.wxVersion,
+                        HookConfig.is_settings_page_transparent
+                )) {
+            return false
+        }
+        LogUtil.log("SettingsHeader unified row matched")
+        view.background = ColorDrawable(getSettingsHeaderBaseColor())
+        applySettingsHeaderSegmentByResourceName(view, "gxn", Color.TRANSPARENT, clearImage = true)
+        applySettingsHeaderSegmentByResourceName(view, "gxv", Color.TRANSPARENT)
+        applySettingsHeaderSegmentByResourceName(view, "gxp", Color.TRANSPARENT, clearImage = true)
+        applySettingsHeaderSegmentByResourceName(view, "o4w", Color.TRANSPARENT)
+        applySettingsHeaderSegmentByResourceName(view, "ovl", Color.TRANSPARENT, clearImage = true)
+        applySettingsHeaderSegmentByResourceName(view, "hxi", Color.TRANSPARENT)
+        VTTV.SettingAvatarView.treeStacks["headView"]?.apply {
+            ViewUtils.getChildView1(view, this)?.let {
+                applySettingsHeaderSegmentBackground(it, Color.TRANSPARENT, clearImage = true)
+            }
+        }
+        VTTV.SettingAvatarView.treeStacks["statusSpacerView"]?.apply {
+            ViewUtils.getChildView1(view, this)?.let {
+                applySettingsHeaderSegmentBackground(it, Color.TRANSPARENT)
+            }
+        }
+        VTTV.SettingAvatarView.treeStacks["q1"]?.apply {
+            ViewUtils.getChildView1(view, this)?.let {
+                applySettingsHeaderSegmentBackground(it, Color.TRANSPARENT, clearImage = true)
+            }
+        }
+        applySettingsHeaderForegroundStyle(view)
+        scheduleSettingsHeaderForegroundRefresh(view)
+        applyMainPageItemRipple(view)
+        return true
+    }
+
+    private fun getSettingsHeaderBaseColor(): Int {
+        return SettingsHeaderStyleResolver.resolveBaseColor(NightModeUtils.isWechatNightMode())
+    }
+
+    private fun isSettingsHeaderRowView(view: View): Boolean {
+        if (view !is ViewGroup) {
+            return false
+        }
+        return findSettingsHeaderViewByResourceName(view, "gxv") != null &&
+                findSettingsHeaderViewByResourceName(view, "kbb") != null &&
+                findSettingsHeaderViewByResourceName(view, "ouv") != null
+    }
+
+    private fun applySettingsHeaderSegmentByResourceName(
+        root: View,
+        resourceName: String,
+        color: Int,
+        clearImage: Boolean = false
+    ) {
+        findSettingsHeaderViewByResourceName(root, resourceName)?.let {
+            applySettingsHeaderSegmentBackground(it, color, clearImage)
+        }
+    }
+
+    private fun applySettingsHeaderSegmentBackground(view: View, color: Int, clearImage: Boolean = false) {
+        if (view is ImageView) {
+            if (clearImage || SettingsHeaderBackgroundPolicy.shouldReplaceWideImageCarrier(
+                            WechatGlobal.wxVersion,
+                            view.width,
+                            view.height
+                    )) {
+                view.setImageDrawable(null)
+                view.clearColorFilter()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    view.imageTintList = null
+                }
+            }
+        }
+        view.background = ColorDrawable(color)
+    }
+
+    private fun applySettingsHeaderForegroundStyle(root: View) {
+        val resourceName = getSettingsHeaderResourceName(root)
+        when {
+            root is ImageView -> applySettingsHeaderImageStyle(root, resourceName)
+            root is TextView || resourceName == "kbb" -> applySettingsHeaderTextStyle(root, resourceName)
+        }
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                applySettingsHeaderForegroundStyle(root.getChildAt(i))
+            }
+        }
+    }
+
+    private fun scheduleSettingsHeaderForegroundRefresh(root: View, attempt: Int = 0) {
+        root.postDelayed({
+            applySettingsHeaderForegroundStyle(root)
+            if (attempt < 5) {
+                scheduleSettingsHeaderForegroundRefresh(root, attempt + 1)
+            }
+        }, 120L)
+    }
+
+    private fun applySettingsHeaderImageStyle(view: ImageView, resourceName: String?) {
+        if (resourceName == "a_4" || resourceName == "ovl") {
+            return
+        }
+        if (resourceName != null && SettingsHeaderStyleResolver.shouldKeepSegmentTransparent(resourceName)) {
+            view.clearColorFilter()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                view.imageTintList = null
+            }
+            return
+        }
+        val iconColor = SettingsHeaderStyleResolver.resolveIconTintColor(
+            if (NightModeUtils.isWechatNightMode()) WeChatHelper.colorDarkWhite else summaryTextColor
+        )
+        view.clearColorFilter()
+        view.setColorFilter(iconColor, PorterDuff.Mode.SRC_IN)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            view.imageTintList = ColorStateList.valueOf(iconColor)
+        }
+    }
+
+    private fun applySettingsHeaderTextStyle(view: View, resourceName: String?) {
+        val textColor = SettingsHeaderStyleResolver.resolveTextColor(
+            resourceName,
+            if (NightModeUtils.isWechatNightMode()) WeChatHelper.colorDarkWhite else titleTextColor,
+            if (NightModeUtils.isWechatNightMode()) WeChatHelper.colorDarkWhite else summaryTextColor
+        )
+        try {
+            XposedHelpers.callMethod(view, "setTextColor", textColor)
+        } catch (_: Throwable) {
+            if (view is TextView) {
+                view.setTextColor(textColor)
+            }
+        }
+    }
+
+    private fun findSettingsHeaderViewByResourceName(root: View, resourceName: String): View? {
+        if (getSettingsHeaderResourceName(root) == resourceName) {
+            return root
+        }
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                val childMatch = findSettingsHeaderViewByResourceName(root.getChildAt(i), resourceName)
+                if (childMatch != null) {
+                    return childMatch
+                }
+            }
+        }
+        return null
+    }
+
+    private fun getSettingsHeaderResourceName(view: View): String? {
+        if (view.id == View.NO_ID) {
+            return null
+        }
+        return try {
+            view.resources.getResourceEntryName(view.id)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     // 8.0.14 之后联系人列表从 LinearLayout 变为 NoDrawingCacheLinearLayout, 8.0.24 之后又变回去了 (?)
     fun setContactListViewItem(view: View) {
         LogUtil.logOnlyOnce("ListViewHooker.ContactListViewItem")
@@ -1302,6 +1953,7 @@ object ListViewHooker : HookerProvider {
                 XposedHelpers.callMethod(titleView80, "setTextColor", titleTextColor)
             }
         }
+        applyMainPageItemRipple(view)
     }
 
     // 联系人列表头部 - 写的比较混乱:有些地方在contactHooker中
@@ -1333,13 +1985,10 @@ object ListViewHooker : HookerProvider {
                             val headTextView = ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["headTextView"]) as TextView
                             headTextView.setTextColor(titleTextColor)
                         }
-                        //  titleView
-                        if (!shouldPreserveWeChatItemBackground) {
-                            ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["titleView"])
-                                    ?.background = createItemRippleDrawable()
-                            ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["borderLineBottom"])
-                                    ?.background = createItemRippleDrawable()
-                        }
+                        ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["titleView"])
+                                ?.apply { applyMainPageItemRipple(this) }
+                        ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["borderLineBottom"])
+                                ?.apply { applyMainPageItemRipple(this) }
                         //endregion
 
 
@@ -1351,11 +2000,8 @@ object ListViewHooker : HookerProvider {
                     // 我的企业
                     if (ViewTreeUtils.equals(VTTV.ContactMyWorkItem.item, contactContentsItem!!)) {
                         LogUtil.logOnlyOnce("ListViewHooker.ContactMyWorkItem")
-                        //  titleView
-                        if (!shouldPreserveWeChatItemBackground) {
-                            ViewUtils.getChildView1(contactContentsItem!!, VTTV.ContactMyWorkItem.treeStacks["titleView"])
-                                    ?.background = createItemRippleDrawable()
-                        }
+                        ViewUtils.getChildView1(contactContentsItem!!, VTTV.ContactMyWorkItem.treeStacks["titleView"])
+                                ?.apply { applyMainPageItemRipple(this) }
                         ViewUtils.getChildView1(contactContentsItem!!, VTTV.ContactMyWorkItem.treeStacks["borderLineBottom"])
                                 ?.background = drawableTransparent
                         if (isHookTextColor) {
@@ -1379,9 +2025,7 @@ object ListViewHooker : HookerProvider {
             var headTextView: View?
             if (itemContent != null) {
                 // 新的朋友 等几个 item
-                if (!shouldPreserveWeChatItemBackground) {
-                    itemContent.background = createItemRippleDrawable()
-                }
+                applyMainPageItemRipple(itemContent)
 //                                                LogUtil.log("-------------")
 //                                                LogUtil.logViewStackTraces(itemContent)
 //                                                LogUtil.log("-------------")
@@ -1395,9 +2039,7 @@ object ListViewHooker : HookerProvider {
                         for (m in 0 until lll.childCount) {
                             val comItem = (lll.getChildAt(m) as ViewGroup)
                             val ll = comItem.getChildAt(0) as ViewGroup
-                            if (!shouldPreserveWeChatItemBackground) {
-                                ll.background = createItemRippleDrawable()
-                            }
+                            applyMainPageItemRipple(ll)
                             // 去掉分割线
                             ll.getChildAt(0).background = drawableTransparent
                             titleTextView = ViewUtils.getChildView(ll, 0, 1)
