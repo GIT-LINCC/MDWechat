@@ -29,6 +29,7 @@ import com.blanke.mdwechat.hookers.main.HomeActionBarHook
 import com.blanke.mdwechat.hookers.main.TabLayoutHook
 import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.RuntimeProbe
+import com.blanke.mdwechat.util.TabLayoutIndicatorPolicy
 import com.blanke.mdwechat.util.ViewUtils
 import com.blanke.mdwechat.util.ViewUtils.measureHeight
 import de.robv.android.xposed.XC_MethodHook
@@ -41,7 +42,6 @@ import java.util.IdentityHashMap
 
 object LauncherUIHooker : HookerProvider {
     const val keyInit = "key_init"
-    private var disablePageScrolledHook = false
 
     override fun provideStaticHookers(): List<Hooker>? {
         return listOf(
@@ -320,13 +320,10 @@ object LauncherUIHooker : HookerProvider {
                 val positionOffset = param?.args!![1] as Float
                 val position = param.args[0]
 //                log("MainTabUIPageAdapter_onPageScrolled ,positionOffset=$positionOffset,startScrollPosition=$position")
-                if (disablePageScrolledHook || positionOffset.toString().contains("E")) {// ?
-                    disablePageScrolledHook = true
-                    return
-                }
+                val normalizedOffset = TabLayoutIndicatorPolicy.normalizePositionOffset(positionOffset)
                 LauncherUI_mTabLayout?.apply {
                     startScrollPosition = position as Int
-                    indicatorOffset = positionOffset
+                    indicatorOffset = normalizedOffset
                     Objects.Main.pagePosition = startScrollPosition
                     BackgroundImageHook.setGuideBarBitmaps(startScrollPosition)
                 }

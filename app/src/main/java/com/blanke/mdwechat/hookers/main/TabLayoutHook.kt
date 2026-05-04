@@ -25,6 +25,16 @@ import de.robv.android.xposed.XposedHelpers
 import java.util.*
 
 object TabLayoutHook {
+    private fun applyTabLayoutItemRipple(tabLayout: CommonTabLayout) {
+        tabLayout.getTabViews().forEach { tabView ->
+            tabView.isClickable = true
+            tabView.isFocusable = true
+            tabView.background = WeChatHelper.wrapItemBackgroundWithRipple(
+                tabView.background ?: ColorDrawable(Color.TRANSPARENT)
+            )
+        }
+    }
+
     private fun newTabLayout(viewGroup: ViewGroup, indicatorGravity: Int = Gravity.BOTTOM, tabElevation: Float): CommonTabLayout {
         val primaryColor: Int = NightModeUtils.colorPrimary
         val secondaryColor: Int = NightModeUtils.colorSecondary
@@ -64,6 +74,7 @@ object TabLayoutHook {
                     }
                 }
         tabLayout.setTabData(mTabEntities)
+        applyTabLayoutItemRipple(tabLayout)
 
         tabLayout.setOnTabSelectListener(object : OnTabSelectListener {
             override fun onTabSelect(position: Int) {
