@@ -19,6 +19,7 @@ import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.hookers.base.Hooker
 import com.blanke.mdwechat.hookers.base.HookerProvider
 import com.blanke.mdwechat.hookers.main.BackgroundImageHook
+import com.blanke.mdwechat.util.ContactPageStyleResolver
 import com.blanke.mdwechat.util.ColorUtils
 import com.blanke.mdwechat.util.ConversationRipplePolicy
 import com.blanke.mdwechat.util.LogUtil
@@ -181,6 +182,70 @@ object ListViewHooker : HookerProvider {
             createItemRippleDrawable()
         }
         SettingsHooker.refreshSettingsStatusOverlayFromListChild(view)
+    }
+
+    private fun applyContactPageItemSurface(view: View) {
+        if (ContactPageStyleResolver.shouldUseTransparentItemSurface()) {
+            view.background = drawableTransparent
+        }
+    }
+
+    private fun applyContactPageItemRipple(view: View) {
+        applyContactPageItemSurface(view)
+        applyMainPageItemRipple(view)
+    }
+
+    fun isContactRecyclerRowView(view: View): Boolean {
+        if (view !is ViewGroup) {
+            return false
+        }
+        return ContactPageStyleResolver.shouldStyleIndexedContactRow(collectViewResourceNames(view))
+    }
+
+    private fun collectViewResourceNames(root: View, collector: MutableSet<String> = mutableSetOf()): Set<String> {
+        getViewResourceName(root)?.let { collector.add(it) }
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                collectViewResourceNames(root.getChildAt(i), collector)
+            }
+        }
+        return collector
+    }
+
+    private fun clearContactPageContainerBackgrounds(root: View) {
+        if (root !is ViewGroup) {
+            return
+        }
+        root.background = drawableTransparent
+        for (i in 0 until root.childCount) {
+            clearContactPageContainerBackgrounds(root.getChildAt(i))
+        }
+    }
+
+    private fun findDescendantViewByResourceName(root: View, resourceName: String): View? {
+        if (getViewResourceName(root) == resourceName) {
+            return root
+        }
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                val match = findDescendantViewByResourceName(root.getChildAt(i), resourceName)
+                if (match != null) {
+                    return match
+                }
+            }
+        }
+        return null
+    }
+
+    private fun getViewResourceName(view: View): String? {
+        if (view.id == View.NO_ID) {
+            return null
+        }
+        return try {
+            view.resources.getResourceEntryName(view.id)
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     private fun findParentAbsListView(view: View): AbsListView? {
@@ -1930,6 +1995,8 @@ object ListViewHooker : HookerProvider {
     // 8.0.14 之后联系人列表从 LinearLayout 变为 NoDrawingCacheLinearLayout, 8.0.24 之后又变回去了 (?)
     fun setContactListViewItem(view: View) {
         LogUtil.logOnlyOnce("ListViewHooker.ContactListViewItem")
+        applyContactPageItemSurface(view)
+        clearContactPageContainerBackgrounds(view)
         // 标题下面的线
         if (VTTV.ContactListViewItem.treeStacks["headerView"] != null) {
             ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["headerView"])
@@ -1946,14 +2013,16 @@ object ListViewHooker : HookerProvider {
 //        titleView80?.apply{
 //            LogUtil.logView(this)}
         if (isHookTextColor) {
-            val headTextView = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["headTextView"]) as TextView
-            headTextView.setTextColor(summaryTextColor)
+            val headTextView = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["headTextView"]) as? TextView
+            headTextView?.setTextColor(summaryTextColor)
             titleView?.apply { XposedHelpers.callMethod(this, "setNickNameTextColor", ColorStateList.valueOf(titleTextColor)) }
             titleView80?.apply {
                 XposedHelpers.callMethod(titleView80, "setTextColor", titleTextColor)
             }
+            (findDescendantViewByResourceName(view, "kbq") as? TextView)?.setTextColor(titleTextColor)
+            (findDescendantViewByResourceName(view, "cfx") as? TextView)?.setTextColor(summaryTextColor)
         }
-        applyMainPageItemRipple(view)
+        applyContactPageItemRipple(view)
     }
 
     // 联系人列表头部 - 写的比较混乱:有些地方在contactHooker中
@@ -1978,6 +2047,7 @@ object ListViewHooker : HookerProvider {
 
                 var contactContentsItem = ViewUtils.getChildView1(this, VTTV.ContactWorkItem.treeStacks["ContactContentsItem"])
                 if (contactContentsItem != null) {
+                    applyContactPageItemSurface(contactContentsItem)
                     //region 企业联系人
                     if (ViewTreeUtils.equals(VTTV.ContactWorkContactsItem.item, contactContentsItem)) {
                         LogUtil.logOnlyOnce("ListViewHooker.ContactWorkContactsItem")
@@ -1986,9 +2056,9 @@ object ListViewHooker : HookerProvider {
                             headTextView.setTextColor(titleTextColor)
                         }
                         ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["titleView"])
-                                ?.apply { applyMainPageItemRipple(this) }
+                                ?.apply { applyContactPageItemRipple(this) }
                         ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["borderLineBottom"])
-                                ?.apply { applyMainPageItemRipple(this) }
+                                ?.background = drawableTransparent
                         //endregion
 
 
@@ -2000,8 +2070,9 @@ object ListViewHooker : HookerProvider {
                     // 我的企业
                     if (ViewTreeUtils.equals(VTTV.ContactMyWorkItem.item, contactContentsItem!!)) {
                         LogUtil.logOnlyOnce("ListViewHooker.ContactMyWorkItem")
+                        applyContactPageItemSurface(contactContentsItem!!)
                         ViewUtils.getChildView1(contactContentsItem!!, VTTV.ContactMyWorkItem.treeStacks["titleView"])
-                                ?.apply { applyMainPageItemRipple(this) }
+                                ?.apply { applyContactPageItemRipple(this) }
                         ViewUtils.getChildView1(contactContentsItem!!, VTTV.ContactMyWorkItem.treeStacks["borderLineBottom"])
                                 ?.background = drawableTransparent
                         if (isHookTextColor) {
@@ -2025,7 +2096,7 @@ object ListViewHooker : HookerProvider {
             var headTextView: View?
             if (itemContent != null) {
                 // 新的朋友 等几个 item
-                applyMainPageItemRipple(itemContent)
+                applyContactPageItemRipple(itemContent)
 //                                                LogUtil.log("-------------")
 //                                                LogUtil.logViewStackTraces(itemContent)
 //                                                LogUtil.log("-------------")
@@ -2039,7 +2110,7 @@ object ListViewHooker : HookerProvider {
                         for (m in 0 until lll.childCount) {
                             val comItem = (lll.getChildAt(m) as ViewGroup)
                             val ll = comItem.getChildAt(0) as ViewGroup
-                            applyMainPageItemRipple(ll)
+                            applyContactPageItemRipple(ll)
                             // 去掉分割线
                             ll.getChildAt(0).background = drawableTransparent
                             titleTextView = ViewUtils.getChildView(ll, 0, 1)

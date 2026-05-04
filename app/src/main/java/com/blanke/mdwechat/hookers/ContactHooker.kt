@@ -1,6 +1,7 @@
 package com.blanke.mdwechat.hookers
 
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ListView
@@ -11,7 +12,9 @@ import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.hookers.base.Hooker
 import com.blanke.mdwechat.hookers.base.HookerProvider
 import com.blanke.mdwechat.hookers.main.BackgroundImageHook
+import com.blanke.mdwechat.util.ContactPageStyleResolver
 import com.blanke.mdwechat.util.LogUtil
+import com.blanke.mdwechat.util.NightModeUtils
 import com.blanke.mdwechat.util.ViewTreeUtils
 import com.blanke.mdwechat.util.ViewUtils
 import de.robv.android.xposed.XC_MethodHook
@@ -21,6 +24,16 @@ import com.blanke.mdwechat.ViewTreeRepoThisVersion as VTTV
 
 object ContactHooker : HookerProvider {
     const val keyInit = "key_init"
+
+    private fun applyContactPageBackground(view: View) {
+        if (HookConfig.is_hook_tab_bg) {
+            BackgroundImageHook.setContactBitmap(view)
+            return
+        }
+        view.background = ColorDrawable(
+            ContactPageStyleResolver.resolvePageBackgroundColor(NightModeUtils.isWechatNightMode())
+        )
+    }
 
 
     override fun provideStaticHookers(): List<Hooker>? {
@@ -54,11 +67,9 @@ object ContactHooker : HookerProvider {
                         backgroundITransparent.setBackgroundColor(Color.TRANSPARENT)
                     }
                     //背景
-                    if (HookConfig.is_hook_tab_bg) {
-                        VTTV.ContactLayoutListenerViewItem.treeStacks["backgroundImage"]?.apply {
-                            val backgroundImage = ViewUtils.getChildView1(contactView, this) as View
-                            BackgroundImageHook.setContactBitmap(backgroundImage)
-                        }
+                    VTTV.ContactLayoutListenerViewItem.treeStacks["backgroundImage"]?.apply {
+                        val backgroundImage = ViewUtils.getChildView1(contactView, this) as View
+                        applyContactPageBackground(backgroundImage)
                     }
 
                     LogUtil.logOnlyOnce("ContactFragment Done")
@@ -131,7 +142,9 @@ object ContactHooker : HookerProvider {
                     ListViewHooker.resetRecycledMainPageRippleState(view)
                     ListViewHooker.prepareReusableItemView(view)
                     // 联系人列表
-                    if (ViewTreeUtils.equals(VTTV.ContactListViewItem.item, view)) {
+                    if (ViewTreeUtils.equals(VTTV.ContactListViewItem.item, view)
+                        || ListViewHooker.isContactRecyclerRowView(view)
+                    ) {
                         ListViewHooker.setContactListViewItem(view)
                     }
                 }
@@ -164,9 +177,7 @@ object ContactHooker : HookerProvider {
                     if (listView != null && listView is ListView) {
                         LogUtil.logOnlyOnce("ContactFragment Done")
                         XposedHelpers.setAdditionalInstanceField(fragment, keyInit, true)
-                        if (HookConfig.is_hook_tab_bg) {
-                            BackgroundImageHook.setContactBitmap(listView)
-                        }
+                        applyContactPageBackground(listView)
 //                        LogUtil.log("ContactFragment listview= $listView, ${listView.javaClass.name}")
                         if (listView.headerViewsCount > 0) {
                             val mHeaderViewInfos = getObjectField(listView, "mHeaderViewInfos") as ArrayList<*>
