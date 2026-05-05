@@ -42,6 +42,7 @@ import java.util.IdentityHashMap
 
 object LauncherUIHooker : HookerProvider {
     const val keyInit = "key_init"
+    private var lastFloatMenuBottomMargin = 0
 
     override fun provideStaticHookers(): List<Hooker>? {
         return listOf(
@@ -123,6 +124,7 @@ object LauncherUIHooker : HookerProvider {
             val isInit = XposedHelpers.getAdditionalInstanceField(activity, keyInit)
             if (isInit != null) {
                 LogUtil.log("LauncherUI 已经hook过")
+                ensureFloatMenu(activity, lastFloatMenuBottomMargin, "$source alreadyInit")
                 RuntimeProbe.append(activity, "$source alreadyInit")
                 return
             }
@@ -243,23 +245,34 @@ object LauncherUIHooker : HookerProvider {
             }
             LogUtil.log("fix completed")
 
-            if (HookConfig.is_hook_float_button) {
-                try {
-                    LogUtil.log("添加 FloatMenu")
-                    FloatMenuHook.addFloatMenu(contentViewGroup, floatButtonMarginBottom * tabViewUnderneathHeight)
-                    RuntimeProbe.append(activity, "$source floatMenuAdded")
-                } catch (e: Throwable) {
-                    LogUtil.log("添加 FloatMenu 报错")
-                    LogUtil.log(e)
-                    RuntimeProbe.append(activity, "$source floatMenuFailed ${e.javaClass.name}:${e.message}")
-                }
-            }
+            lastFloatMenuBottomMargin = floatButtonMarginBottom * tabViewUnderneathHeight
+            ensureFloatMenu(activity, lastFloatMenuBottomMargin, source)
             XposedHelpers.setAdditionalInstanceField(activity, keyInit, true)
             LogUtil.log("LaunchUI Hook Completed.")
             RuntimeProbe.append(activity, "$source initDone tab=${HookConfig.is_hook_tab} tabBg=${HookConfig.is_hook_tab_bg} actionBarColor=${HookConfig.is_hook_actionbar_color} floatButton=${HookConfig.is_hook_float_button}")
         } catch (e: Exception) {
             RuntimeProbe.append(activity, "$source initFailed ${e.javaClass.name}:${e.message}")
             LogUtil.log(e)
+        }
+    }
+
+    private fun ensureFloatMenu(activity: Activity, bottomMargin: Int, source: String) {
+        if (!HookConfig.is_hook_float_button) {
+            return
+        }
+        try {
+            LogUtil.log("添加 FloatMenu")
+            val floatButtonContainer = activity.findViewById<ViewGroup>(android.R.id.content)
+            if (floatButtonContainer == null) {
+                RuntimeProbe.append(activity, "$source floatMenuContainerMissing")
+                return
+            }
+            FloatMenuHook.addFloatMenu(floatButtonContainer, bottomMargin)
+            RuntimeProbe.append(activity, "$source floatMenuAdded")
+        } catch (e: Throwable) {
+            LogUtil.log("添加 FloatMenu 报错")
+            LogUtil.log(e)
+            RuntimeProbe.append(activity, "$source floatMenuFailed ${e.javaClass.name}:${e.message}")
         }
     }
 

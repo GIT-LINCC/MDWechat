@@ -2,7 +2,10 @@ package com.blanke.mdwechat.hookers.main
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.view.*
 import android.widget.FrameLayout
@@ -28,14 +31,21 @@ import de.robv.android.xposed.XposedHelpers
 
 
 object FloatMenuHook {
+    private const val FLOAT_MENU_DESC = "MDWECHAT_FLOAT_MENU_OK"
+    private const val FLOAT_MENU_BACKGROUND_DESC = "MDWECHAT_FLOAT_MENU_BACKGROUND"
+    private val reattachDelays = longArrayOf(200L, 600L, 1200L)
 
     fun addFloatMenu(contentLayout: ViewGroup, bottomMargin: Int = 0) {
         RuntimeProbe.append(contentLayout.context, "FloatMenu start bottomMargin=$bottomMargin")
+        contentLayout.findFloatMenu()?.let { floatMenu ->
+            floatMenu.bringToFront()
+            contentLayout.requestLayout()
+            contentLayout.invalidate()
+            RuntimeProbe.append(contentLayout.context, "FloatMenu alreadyAttached bringToFront")
+            return
+        }
         FloatingActionMenu.OPENED_PLUS_ROTATION_LEFT = HookConfig.value_hook_float_button_angle.toFloat()
-        val context = ModuleContextCompat.wrap(
-            contentLayout.context,
-            R.style.Theme_MDWechat_MaterialTabs
-        )
+        val context = ModuleContextCompat.wrapModuleTheme(contentLayout.context, R.style.Theme_MDWechat_FloatMenu)
         val floatConfig = AppCustomConfig.getFloatButtonConfig()
         if (floatConfig?.items == null || floatConfig.menu?.icon == null) {
             log("floatButton 主 icon 为空")
@@ -46,18 +56,17 @@ object FloatMenuHook {
 //        val secondaryColor = HookConfig.get_color_secondary
         val floatButtonColor = NightModeUtils.colorFloatButton
         val actionMenu = FloatingActionMenu(context)
-        actionMenu.contentDescription = "MDWECHAT_FLOAT_MENU_OK"
+        actionMenu.contentDescription = FLOAT_MENU_DESC
         actionMenu.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         actionMenu.menuButtonColorNormal = primaryColor
         actionMenu.menuButtonColorPressed = primaryColor
         actionMenu.setmLabelsTextColor(floatButtonColor)
-        val bitmap: Bitmap? = AppCustomConfig.getIcon(floatConfig.menu!!.icon)
-        if (bitmap == null) {
-            log("floatButton 主 icon 为空")
-            RuntimeProbe.append(contentLayout.context, "FloatMenu iconMissing ${floatConfig.menu!!.icon}")
-            return
-        }
-        var drawable: Drawable = BitmapDrawable(context.resources, bitmap)
+        val bitmap: Bitmap? = getFloatIcon(context, floatConfig.menu!!.icon)
+        var drawable: Drawable = bitmap?.let { BitmapDrawable(context.resources, it) }
+                ?: fallbackMenuDrawable(context).also {
+                    log("floatButton 主 icon 为空, 使用默认图标")
+                    RuntimeProbe.append(contentLayout.context, "FloatMenu iconFallback ${floatConfig.menu!!.icon}")
+                }
         drawable = if (HookConfig.is_hook_float_button_color_up) DrawableUtils.setDrawableColor(drawable, floatButtonColor) else drawable
         actionMenu.setMenuIcon(drawable)
         actionMenu.initMenuButton()
@@ -68,15 +77,16 @@ object FloatMenuHook {
         val floatItems = arrayListOf<FLoatButtonConfigItem>()
         floatConfig.items?.sortedBy { it.order }
                 ?.forEach {
-                    val drawable2: Bitmap? = AppCustomConfig.getIcon(it.icon)
-                    if (drawable2 == null) {
-                        log("${it.icon}不存在,忽略~")
-                        return@forEach
-                    }
+                    val drawable2: Bitmap? = getFloatIcon(context, it.icon)
+                    val itemDrawable = drawable2
+                            ?.let { bitmap -> BitmapDrawable(context.resources, AppCustomConfig.getScaleBitmap(bitmap)) }
+                            ?: fallbackMenuDrawable(context).also { _ ->
+                                log("${it.icon}不存在, 使用默认图标")
+                                RuntimeProbe.append(contentLayout.context, "FloatMenu itemIconFallback ${it.icon}")
+                            }
                     floatItems.add(it)
                     getFloatButton(actionMenu, context, it.text,
-                            BitmapDrawable(context.resources,
-                                    AppCustomConfig.getScaleBitmap(drawable2)), primaryColor, floatButtonColor, HookConfig.is_hook_float_button_color_up)
+                            itemDrawable, primaryColor, floatButtonColor, HookConfig.is_hook_float_button_color_up)
                 }
 
         actionMenu.setFloatButtonClickListener { fab, index ->
@@ -122,6 +132,7 @@ object FloatMenuHook {
         }
 
         val backgroundView = View(context)
+        backgroundView.contentDescription = FLOAT_MENU_BACKGROUND_DESC
         val params2 = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         backgroundView.visibility = View.GONE
         backgroundView.setOnClickListener { view ->
@@ -133,7 +144,57 @@ object FloatMenuHook {
         }
         contentLayout.addView(backgroundView, params2)
         contentLayout.addView(actionMenu, params)
+        actionMenu.bringToFront()
+        ensureAttachedLater(contentLayout, backgroundView, params2, actionMenu, params)
         RuntimeProbe.append(contentLayout.context, "FloatMenu addViewDone items=${floatItems.size}")
+    }
+
+    private fun ensureAttachedLater(
+        contentLayout: ViewGroup,
+        backgroundView: View,
+        backgroundParams: ViewGroup.LayoutParams,
+        actionMenu: FloatingActionMenu,
+        actionParams: ViewGroup.LayoutParams
+    ) {
+        reattachDelays.forEach { delay ->
+            contentLayout.postDelayed({
+                try {
+                    if (contentLayout.findFloatMenu() == null) {
+                        val backgroundParent = backgroundView.parent
+                        if (backgroundParent != null && backgroundParent !== contentLayout && backgroundParent is ViewGroup) {
+                            backgroundParent.removeView(backgroundView)
+                        }
+                        if (backgroundView.parent == null) {
+                            contentLayout.addView(backgroundView, backgroundParams)
+                        }
+                        val actionParent = actionMenu.parent
+                        if (actionParent != null && actionParent !== contentLayout && actionParent is ViewGroup) {
+                            actionParent.removeView(actionMenu)
+                        }
+                        if (actionMenu.parent == null) {
+                            contentLayout.addView(actionMenu, actionParams)
+                        }
+                        RuntimeProbe.append(contentLayout.context, "FloatMenu reattached delay=$delay")
+                    }
+                    actionMenu.bringToFront()
+                    contentLayout.requestLayout()
+                    contentLayout.invalidate()
+                } catch (t: Throwable) {
+                    LogUtil.log(t)
+                    RuntimeProbe.append(contentLayout.context, "FloatMenu reattachFailed delay=$delay ${t.javaClass.name}:${t.message}")
+                }
+            }, delay)
+        }
+    }
+
+    private fun ViewGroup.findFloatMenu(): View? {
+        for (index in 0 until childCount) {
+            val child = getChildAt(index)
+            if (child.contentDescription == FLOAT_MENU_DESC) {
+                return child
+            }
+        }
+        return null
     }
 
     private fun getFloatButton(actionMenu: FloatingActionMenu, context: Context,
@@ -150,6 +211,21 @@ object FloatMenuHook {
         actionMenu.addMenuButton(fab)
         fab.setLabelColors(primaryColor, primaryColor, primaryColor)
         return fab
+    }
+
+    private fun fallbackMenuDrawable(context: Context): Drawable {
+        return context.getDrawable(android.R.drawable.ic_input_add) ?: ColorDrawable(Color.TRANSPARENT)
+    }
+
+    private fun getFloatIcon(context: Context, fileName: String): Bitmap? {
+        AppCustomConfig.getIcon(fileName)?.let { return it }
+        return try {
+            context.assets.open("${Common.ICON_DIR}/$fileName").use { input ->
+                BitmapFactory.decodeStream(input)
+            }
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     private fun onFloatButtonClick(item: FLoatButtonConfigItem, index: Int) {

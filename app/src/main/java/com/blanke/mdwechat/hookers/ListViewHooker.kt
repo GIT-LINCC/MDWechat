@@ -2135,7 +2135,11 @@ object ListViewHooker : HookerProvider {
                             titleTextView = ViewUtils.getChildView(childView, 0, 0, 0, 1)
                             ViewUtils.getChildView(childView, 0, 0)?.background = drawableTransparent
                         }
-                        if (maskLayout != null && maskLayout is ViewGroup) {
+                        if (
+                                ContactPageStyleResolver.shouldWrapHeaderEntryIcon(WechatGlobal.wxVersion)
+                                && maskLayout != null
+                                && maskLayout is ViewGroup
+                        ) {
                             val iv = maskLayout.getChildAt(0)
                             if (iv is ImageView) {
                                 val roundLayout = RCRelativeLayout(Objects.Main.LauncherUI!!)

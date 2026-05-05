@@ -1,6 +1,7 @@
 package com.blanke.mdwechat.config
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.blanke.mdwechat.Common
@@ -62,8 +63,7 @@ object AppCustomConfig {
     }
 
     private fun openBundledWxConfigFromApk(configName: String): InputStream {
-        val systemContext = getSystemContext()
-        val appInfo = systemContext.packageManager.getApplicationInfo(Common.MY_APPLICATION_PACKAGE, 0)
+        val appInfo = getModuleApplicationInfo()
         ZipFile(appInfo.sourceDir).use { zipFile ->
             val entry = zipFile.getEntry("assets/${Common.CONFIG_WECHAT_DIR}/$configName")
                     ?: throw java.io.FileNotFoundException("assets/${Common.CONFIG_WECHAT_DIR}/$configName")
@@ -90,6 +90,37 @@ object AppCustomConfig {
                 XposedHelpers.findClass("android.app.ActivityThread", null),
                 "currentActivityThread")
         return XposedHelpers.callMethod(activityThread, "getSystemContext") as Context
+    }
+
+    private fun getModuleApplicationInfo(): ApplicationInfo {
+        val systemContext = getSystemContext()
+        try {
+            @Suppress("DEPRECATION")
+            return systemContext.packageManager.getApplicationInfo(Common.MY_APPLICATION_PACKAGE, 0)
+        } catch (packageManagerError: Throwable) {
+            val activityThreadClass = XposedHelpers.findClass("android.app.ActivityThread", null)
+            val iPackageManager = XposedHelpers.callStaticMethod(activityThreadClass, "getPackageManager")
+            val userHandleClass = XposedHelpers.findClass("android.os.UserHandle", null)
+            val userId = XposedHelpers.callStaticMethod(userHandleClass, "myUserId") as Int
+            val appInfo = try {
+                XposedHelpers.callMethod(
+                        iPackageManager,
+                        "getApplicationInfo",
+                        Common.MY_APPLICATION_PACKAGE,
+                        0L,
+                        userId
+                ) as? ApplicationInfo
+            } catch (_: Throwable) {
+                XposedHelpers.callMethod(
+                        iPackageManager,
+                        "getApplicationInfo",
+                        Common.MY_APPLICATION_PACKAGE,
+                        0,
+                        userId
+                ) as? ApplicationInfo
+            }
+            return appInfo ?: throw packageManagerError
+        }
     }
 
     fun getWxConfigFile(fileName: String): String {
@@ -221,7 +252,7 @@ object AppCustomConfig {
     fun getIcon(fileName: String): Bitmap? {
         val filePath = getIconPath(fileName)
         BitmapFactory.decodeFile(filePath)?.let { return it }
-        return openBundledAssetFromApk("${Common.ICON_DIR}/$fileName").useQuietly { input ->
+        return openBundledAsset("${Common.ICON_DIR}/$fileName").useQuietly { input ->
             if (input == null) null else BitmapFactory.decodeStream(input)
         }
     }
@@ -244,7 +275,7 @@ object AppCustomConfig {
         } catch (_: Exception) {
             return false
         }
-        val bundledBytes = openBundledAssetFromApk("${Common.ICON_DIR}/$fileName").useQuietly { input ->
+        val bundledBytes = openBundledAsset("${Common.ICON_DIR}/$fileName").useQuietly { input ->
             input?.readBytes()
         } ?: return false
         return externalBytes.contentEquals(bundledBytes)
@@ -270,7 +301,7 @@ object AppCustomConfig {
             }
         } catch (_: Exception) {
         }
-        return openBundledAssetFromApk(bundledAssetPath).useQuietly { input ->
+        return openBundledAsset(bundledAssetPath).useQuietly { input ->
             if (input == null) {
                 null
             } else {
@@ -316,10 +347,17 @@ object AppCustomConfig {
         )
     }
 
+    private fun openBundledAsset(assetPath: String): InputStream? {
+        try {
+            return getModuleContext().assets.open(assetPath)
+        } catch (_: Exception) {
+        }
+        return openBundledAssetFromApk(assetPath)
+    }
+
     private fun openBundledAssetFromApk(assetPath: String): InputStream? {
         return try {
-            val systemContext = getSystemContext()
-            val appInfo = systemContext.packageManager.getApplicationInfo(Common.MY_APPLICATION_PACKAGE, 0)
+            val appInfo = getModuleApplicationInfo()
             val zipFile = ZipFile(appInfo.sourceDir)
             val entry = zipFile.getEntry("assets/$assetPath") ?: run {
                 zipFile.close()

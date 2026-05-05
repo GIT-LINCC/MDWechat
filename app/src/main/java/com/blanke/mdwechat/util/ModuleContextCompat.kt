@@ -57,6 +57,20 @@ object ModuleContextCompat {
         }
     }
 
+    fun wrapModuleTheme(baseContext: Context, @StyleRes themeResId: Int): Context {
+        return try {
+            val resources = createModuleResources(baseContext)
+            ModuleOnlyThemedContextWrapper(baseContext, resources, themeResId)
+        } catch (t: Throwable) {
+            LogUtil.log(t)
+            RuntimeProbe.append(
+                baseContext,
+                "ModuleContextCompat.wrapModuleTheme failed ${t.javaClass.name}:${t.message} probe=$lastModulePathProbe"
+            )
+            baseContext
+        }
+    }
+
     private fun createModuleResources(baseContext: Context): Resources {
         val assetManager = AssetManager::class.java.getDeclaredConstructor().newInstance()
         AssetManager::class.java
@@ -277,6 +291,31 @@ object ModuleContextCompat {
         override fun getSystemService(name: String): Any? {
             if (Context.LAYOUT_INFLATER_SERVICE == name) {
                 return inflater
+            }
+            return super.getSystemService(name)
+        }
+    }
+
+    private class ModuleOnlyThemedContextWrapper(
+        baseContext: Context,
+        private val themedResources: Resources,
+        @StyleRes themeResId: Int
+    ) : ContextWrapper(baseContext) {
+        private val themedInflater by lazy(LazyThreadSafetyMode.NONE) {
+            LayoutInflater.from(baseContext).cloneInContext(this)
+        }
+        private val moduleTheme = themedResources.newTheme().apply {
+            applyStyle(themeResId, true)
+        }
+
+        override fun getAssets(): AssetManager = themedResources.assets
+        override fun getResources(): Resources = themedResources
+        override fun getTheme(): Resources.Theme = moduleTheme
+        override fun getPackageName(): String = Common.MY_APPLICATION_PACKAGE
+
+        override fun getSystemService(name: String): Any? {
+            if (Context.LAYOUT_INFLATER_SERVICE == name) {
+                return themedInflater
             }
             return super.getSystemService(name)
         }
