@@ -202,6 +202,21 @@ object LauncherUIHooker : HookerProvider {
                     } catch (e: Throwable) {
                         LogUtil.log("添加 TabLayout 报错")
                         LogUtil.log(e)
+                        val topTabFailSummary = buildString {
+                            append("topTabFail:")
+                            append(TabLayoutHook.lastTopAttachStage)
+                            append(":")
+                            append(e.javaClass.simpleName)
+                            e.message
+                                ?.replace('\n', ' ')
+                                ?.take(80)
+                                ?.takeIf { it.isNotBlank() }
+                                ?.let {
+                                    append(":")
+                                    append(it)
+                                }
+                        }
+                        LogUtil.toast(topTabFailSummary)
                         RuntimeProbe.append(activity, "$source topTabFailed ${e.javaClass.name}:${e.message}")
                     }
                 }
@@ -309,7 +324,9 @@ object LauncherUIHooker : HookerProvider {
                 if (Objects.Main.LauncherUI_mViewPager == vp) {
                     val position = param?.args!![0] as Int
 //                    log("WxViewPager_selectedPage position = $position , arg[1] =${param?.args!![1]}")
-                    LauncherUI_mTabLayout?.currentTab = position
+                    LauncherUI_mTabLayout?.apply {
+                        setCurrentTab(position)
+                    }
                     Objects.Main.pagePosition = position
                     BackgroundImageHook.setGuideBarBitmaps(position)
                 }
@@ -318,14 +335,13 @@ object LauncherUIHooker : HookerProvider {
         XposedHelpers.findAndHookMethod(MainTabUIPageAdapter, MainTabUIPageAdapter_onPageScrolled.name, CC.Int, Float::class.java, CC.Int, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam?) {
                 val positionOffset = param?.args!![1] as Float
-                val position = param.args[0]
+                val position = param.args[0] as Int
 //                log("MainTabUIPageAdapter_onPageScrolled ,positionOffset=$positionOffset,startScrollPosition=$position")
                 val normalizedOffset = TabLayoutIndicatorPolicy.normalizePositionOffset(positionOffset)
                 LauncherUI_mTabLayout?.apply {
-                    startScrollPosition = position as Int
-                    indicatorOffset = normalizedOffset
-                    Objects.Main.pagePosition = startScrollPosition
-                    BackgroundImageHook.setGuideBarBitmaps(startScrollPosition)
+                    syncIndicator(position, normalizedOffset)
+                    Objects.Main.pagePosition = position
+                    BackgroundImageHook.setGuideBarBitmaps(position)
                 }
             }
         })
@@ -346,7 +362,7 @@ object LauncherUIHooker : HookerProvider {
                         val number = if (text.length == 0) 0 else text.toIntOrNull()
                         LauncherUI_mTabLayout?.apply {
                             number?.apply {
-                                showMsg(position, number)
+                                showUnread(position, number)
                             }
                         }
                     }
@@ -368,9 +384,9 @@ object LauncherUIHooker : HookerProvider {
 //                        log("unread position= $position,visible = ${visible == View.VISIBLE}")
                         LauncherUI_mTabLayout?.apply {
                             if (visible == View.VISIBLE) {
-                                showMsg(position, -1)
-                            } else if (!hasMsg(position)) {
-                                showMsg(position, 0)
+                                showUnread(position, -1)
+                            } else if (!hasUnread(position)) {
+                                showUnread(position, 0)
                             }
                         }
                     }

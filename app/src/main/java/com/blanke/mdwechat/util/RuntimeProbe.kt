@@ -12,7 +12,7 @@ object RuntimeProbe {
     private const val FILE_NAME = "runtime_probe.txt"
 
     private fun getProbeFile(context: Context): File {
-        val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
+        val baseDir = context.filesDir
         val probeDir = File(baseDir, DIR_NAME)
         if (!probeDir.exists()) {
             probeDir.mkdirs()

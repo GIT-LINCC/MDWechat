@@ -23,6 +23,7 @@ import com.blanke.mdwechat.util.RuntimeProbe
 import com.github.clans.fab.FloatingActionButton
 import com.github.clans.fab.FloatingActionButton.SIZE_MINI
 import com.github.clans.fab.FloatingActionMenu
+import com.joshcai.mdwechat.R
 import de.robv.android.xposed.XposedHelpers
 
 
@@ -31,7 +32,10 @@ object FloatMenuHook {
     fun addFloatMenu(contentLayout: ViewGroup, bottomMargin: Int = 0) {
         RuntimeProbe.append(contentLayout.context, "FloatMenu start bottomMargin=$bottomMargin")
         FloatingActionMenu.OPENED_PLUS_ROTATION_LEFT = HookConfig.value_hook_float_button_angle.toFloat()
-        val context = ModuleContextCompat.wrap(contentLayout.context)
+        val context = ModuleContextCompat.wrap(
+            contentLayout.context,
+            R.style.Theme_MDWechat_MaterialTabs
+        )
         val floatConfig = AppCustomConfig.getFloatButtonConfig()
         if (floatConfig?.items == null || floatConfig.menu?.icon == null) {
             log("floatButton 主 icon 为空")

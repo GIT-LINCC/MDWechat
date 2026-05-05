@@ -7,6 +7,7 @@ import com.blanke.mdwechat.Version
 import com.blanke.mdwechat.WechatGlobal
 import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.util.LogUtil
+import com.blanke.mdwechat.util.RuntimeProbe
 import com.blanke.mdwechat.util.ViewUtils
 import com.blanke.mdwechat.util.waitInvoke
 import de.robv.android.xposed.XposedHelpers
@@ -22,15 +23,19 @@ object HomeActionBarHook {
             val layoutParams = viewpager.layoutParams as ViewGroup.MarginLayoutParams
             val offset = HookConfig.value_main_text_offset + HookConfig.value_tab_layout_offset
             LogUtil.log("offset: $offset = value_main_text_offset: ${HookConfig.value_main_text_offset} + value_tab_layout_offset: ${HookConfig.value_tab_layout_offset}")
-            if (!HookConfig.is_hook_hide_actionbar && is_tab_layout_on_top) {
-                layoutParams.topMargin = actionHeight + offset
-            } else if (HookConfig.is_hook_hide_actionbar && !is_tab_layout_on_top) {
+            if (is_tab_layout_on_top) {
+                layoutParams.topMargin = offset
+            } else if (HookConfig.is_hook_hide_actionbar) {
                 layoutParams.topMargin = -actionHeight + offset
             } else {
                 layoutParams.topMargin = offset
             }
             viewpager.layoutParams = layoutParams
             viewpager.requestLayout()
+            RuntimeProbe.append(
+                viewPagerLinearLayout.context,
+                "HomeActionBarHook topMargin=${layoutParams.topMargin} actionHeight=$actionHeight topTab=$is_tab_layout_on_top hideActionBar=${HookConfig.is_hook_hide_actionbar}"
+            )
         }
         val mActionBar = Objects.Main.HomeUI_mActionBar!!
         var actionHeight = 0
@@ -51,14 +56,23 @@ object HomeActionBarHook {
             if(quitFix){
                 return@waitInvoke
             }
-            if (HookConfig.is_hook_hide_actionbar) {
+            if (HookConfig.is_hook_hide_actionbar || is_tab_layout_on_top) {
                 LogUtil.log("隐藏 actionBar $mActionBar")
                 if (mActionBar is View) {
                     mActionBar.visibility = View.GONE
                     mActionBar.layoutParams.height = 0
+                    mActionBar.requestLayout()
                     LogUtil.log("隐藏 actionBar 成功")
+                    RuntimeProbe.append(
+                        viewPagerLinearLayout.context,
+                        "HomeActionBarHook actionBarHidden class=${mActionBar.javaClass.name}"
+                    )
                 } else {
                     LogUtil.log("隐藏 actionBar 失败, actionBar 不是 view")
+                    RuntimeProbe.append(
+                        viewPagerLinearLayout.context,
+                        "HomeActionBarHook actionBarHideSkipped class=${mActionBar::class.java.name}"
+                    )
                 }
             }
         })

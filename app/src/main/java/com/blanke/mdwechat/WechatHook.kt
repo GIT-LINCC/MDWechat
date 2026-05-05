@@ -12,18 +12,26 @@ import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.LogUtil.log
 import com.blanke.mdwechat.util.RuntimeProbe
 import com.blanke.mdwechat.util.FileUtils
+import com.blanke.mdwechat.util.ModuleContextCompat
 import com.blanke.mdwechat.util.waitInvoke
 import com.joshcai.mdwechat.BuildConfig
 import de.robv.android.xposed.IXposedHookLoadPackage
+import de.robv.android.xposed.IXposedHookZygoteInit
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import de.robv.android.xposed.XposedBridge
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 
-class WechatHook : IXposedHookLoadPackage {
+class WechatHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
     private fun debugLine(msg: String) {
         val stamp = SimpleDateFormat("HH:mm:ss").format(Date())
         FileUtils.write(AppCustomConfig.getLogFile("hook_debug"), "$stamp $msg\n", true)
+    }
+
+    override fun initZygote(startupParam: IXposedHookZygoteInit.StartupParam?) {
+        ModuleContextCompat.setModuleApkPath(startupParam?.modulePath)
+        XposedBridge.log("MDWechatModule: initZygote modulePath=${startupParam?.modulePath}")
     }
 
     @Throws(Throwable::class)

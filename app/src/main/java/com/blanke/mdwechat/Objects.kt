@@ -5,7 +5,7 @@ import android.content.Context
 import android.view.MenuItem
 import android.view.View
 import com.blanke.mdwechat.util.LogUtil
-import com.flyco.tablayout.CommonTabLayout
+import com.blanke.mdwechat.widget.MdMaterialTabLayout
 
 object Objects {
     object Main {
@@ -18,12 +18,12 @@ object Objects {
         var LauncherUI_mContentLayout: View? = null
         var HomeUI_mActionBar: Any? = null
         var LauncherUI_mViewPager: View? = null
-        var LauncherUI_mTabLayout: CommonTabLayout? = null
+        var LauncherUI_mTabLayout: MdMaterialTabLayout? = null
         var LauncherUI_mWechatXMenuItem: MenuItem? = null
         var statusView: View? = null
         var actionBar: View? = null
 
-        var tabLayout: CommonTabLayout? = null
+        var tabLayout: MdMaterialTabLayout? = null
         var contactPageFix: View? = null
         var pagePosition = 0
 

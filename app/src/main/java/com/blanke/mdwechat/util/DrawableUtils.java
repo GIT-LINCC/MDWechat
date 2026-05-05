@@ -18,6 +18,7 @@ import java.util.Arrays;
  */
 
 public class DrawableUtils {
+    private static final float DEFAULT_RIPPLE_CORNER_RADIUS = 3f;
 
     // 为单个drawable着色并返回着色后的drawable
     public static Drawable setDrawableColor(Drawable drawable, Integer colorResId) {
@@ -40,18 +41,25 @@ public class DrawableUtils {
     }
 
     public static RippleDrawable getTransparentColorRippleDrawable(int normalColor, int pressedColor) {
-        return new RippleDrawable(ColorStateList.valueOf(pressedColor), new ColorDrawable(Color.TRANSPARENT), getRippleMask(normalColor));
+        return new RippleDrawable(ColorStateList.valueOf(pressedColor), new ColorDrawable(Color.TRANSPARENT), getRippleMask(normalColor, DEFAULT_RIPPLE_CORNER_RADIUS));
     }
 
     public static RippleDrawable getColorRippleDrawable(int normalColor, int pressedColor) {
-        return new RippleDrawable(ColorStateList.valueOf(pressedColor), new ColorDrawable(normalColor), getRippleMask(normalColor));
+        return new RippleDrawable(ColorStateList.valueOf(pressedColor), new ColorDrawable(normalColor), getRippleMask(normalColor, DEFAULT_RIPPLE_CORNER_RADIUS));
     }
 
-    private static Drawable getRippleMask(int color) {
+    public static RippleDrawable wrapDrawableWithRipple(Drawable contentDrawable, int maskColor, int pressedColor) {
+        return wrapDrawableWithRipple(contentDrawable, maskColor, pressedColor, DEFAULT_RIPPLE_CORNER_RADIUS);
+    }
+
+    public static RippleDrawable wrapDrawableWithRipple(Drawable contentDrawable, int maskColor, int pressedColor, float cornerRadius) {
+        Drawable safeContentDrawable = contentDrawable != null ? contentDrawable : new ColorDrawable(Color.TRANSPARENT);
+        return new RippleDrawable(ColorStateList.valueOf(pressedColor), safeContentDrawable, getRippleMask(maskColor, cornerRadius));
+    }
+
+    private static Drawable getRippleMask(int color, float cornerRadius) {
         float[] outerRadii = new float[8];
-        // 3 is radius of final ripple,
-        // instead of 3 you can give required final radius
-        Arrays.fill(outerRadii, 3);
+        Arrays.fill(outerRadii, Math.max(0f, cornerRadius));
 
         RoundRectShape r = new RoundRectShape(outerRadii, null, null);
         ShapeDrawable shapeDrawable = new ShapeDrawable(r);

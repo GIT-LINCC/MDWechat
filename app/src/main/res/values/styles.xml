@@ -4,4 +4,17 @@
     <style name="AppTheme">
     </style>
 
+    <style name="Theme.MDWechat.MaterialTabs" parent="Theme.MaterialComponents.Light.NoActionBar.Bridge">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorSecondary">@color/colorSecondary</item>
+        <item name="android:colorBackground">@color/colorPrimary</item>
+        <item name="colorSurface">@color/colorPrimary</item>
+        <item name="colorOnSurface">@color/material_black_87</item>
+        <item name="colorOnPrimary">@color/material_white</item>
+        <item name="colorOnSecondary">@color/material_white</item>
+        <item name="colorError">@color/material_red_700</item>
+        <item name="textAppearanceButton">@style/TextAppearance.MaterialComponents.Caption</item>
+    </style>
+
 </resources>
