@@ -51,4 +51,33 @@ class TabLayoutIndicatorPolicyTest {
         assertEquals(2f, TabLayoutIndicatorPolicy.indicatorHeightDp(isSmall = false), 0f)
         assertEquals(1f, TabLayoutIndicatorPolicy.indicatorHeightDp(isSmall = true), 0f)
     }
+
+    @Test
+    fun topTabContentKeepsSmallGapBelowIndicator() {
+        assertEquals(4f, TabLayoutIndicatorPolicy.topContentGapDp(), 0f)
+    }
+
+    @Test
+    fun topTabAppliesContentOffsetEvenWhenActionBarWasAlreadyHidden() {
+        assertEquals(
+            true,
+            TabLayoutIndicatorPolicy.shouldApplyTopContentOffset(
+                isTopTabLayout = true,
+                actionBarHeight = 0,
+                quitFix = false
+            )
+        )
+    }
+
+    @Test
+    fun nonTopTabStillWaitsForActionBarHeightBeforeOffset() {
+        assertEquals(
+            false,
+            TabLayoutIndicatorPolicy.shouldApplyTopContentOffset(
+                isTopTabLayout = false,
+                actionBarHeight = 0,
+                quitFix = false
+            )
+        )
+    }
 }

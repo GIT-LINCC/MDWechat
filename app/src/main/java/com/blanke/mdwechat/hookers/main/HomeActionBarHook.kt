@@ -6,8 +6,10 @@ import com.blanke.mdwechat.Objects
 import com.blanke.mdwechat.Version
 import com.blanke.mdwechat.WechatGlobal
 import com.blanke.mdwechat.config.HookConfig
+import com.blanke.mdwechat.util.ConvertUtils
 import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.RuntimeProbe
+import com.blanke.mdwechat.util.TabLayoutIndicatorPolicy
 import com.blanke.mdwechat.util.ViewUtils
 import com.blanke.mdwechat.util.waitInvoke
 import de.robv.android.xposed.XposedHelpers
@@ -22,9 +24,14 @@ object HomeActionBarHook {
             val viewpager = viewPagerLinearLayout.getChildAt(0)
             val layoutParams = viewpager.layoutParams as ViewGroup.MarginLayoutParams
             val offset = HookConfig.value_main_text_offset + HookConfig.value_tab_layout_offset
+            val topContentGap = if (is_tab_layout_on_top) {
+                ConvertUtils.dp2px(viewPagerLinearLayout.context, TabLayoutIndicatorPolicy.topContentGapDp())
+            } else {
+                0
+            }
             LogUtil.log("offset: $offset = value_main_text_offset: ${HookConfig.value_main_text_offset} + value_tab_layout_offset: ${HookConfig.value_tab_layout_offset}")
             if (is_tab_layout_on_top) {
-                layoutParams.topMargin = offset
+                layoutParams.topMargin = offset + topContentGap
             } else if (HookConfig.is_hook_hide_actionbar) {
                 layoutParams.topMargin = -actionHeight + offset
             } else {
@@ -49,7 +56,11 @@ object HomeActionBarHook {
                 LogUtil.log("mActionBar = ${mActionBar}")
                 LogUtil.log(e)
             }
-            quitFix || (actionHeight > 0)
+            TabLayoutIndicatorPolicy.shouldApplyTopContentOffset(
+                isTopTabLayout = is_tab_layout_on_top,
+                actionBarHeight = actionHeight,
+                quitFix = quitFix
+            )
         }, {
             LogUtil.log("actionBarHeight = $actionHeight")
             cb(actionHeight)

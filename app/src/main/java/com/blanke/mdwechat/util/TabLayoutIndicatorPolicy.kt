@@ -26,4 +26,16 @@ object TabLayoutIndicatorPolicy {
     fun indicatorHeightDp(isSmall: Boolean): Float {
         return if (isSmall) smallIndicatorHeightDp else regularIndicatorHeightDp
     }
+
+    fun topContentGapDp(): Float {
+        return 4f
+    }
+
+    fun shouldApplyTopContentOffset(
+        isTopTabLayout: Boolean,
+        actionBarHeight: Int,
+        quitFix: Boolean
+    ): Boolean {
+        return quitFix || actionBarHeight > 0 || isTopTabLayout
+    }
 }
