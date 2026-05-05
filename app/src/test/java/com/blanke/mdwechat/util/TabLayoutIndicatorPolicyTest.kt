@@ -35,4 +35,20 @@ class TabLayoutIndicatorPolicyTest {
             0f
         )
     }
+
+    @Test
+    fun regularIndicatorUsesFullTabWidth() {
+        assertEquals(false, TabLayoutIndicatorPolicy.indicatorOnContent(isSmall = false))
+    }
+
+    @Test
+    fun smallIndicatorUsesContentWidth() {
+        assertEquals(true, TabLayoutIndicatorPolicy.indicatorOnContent(isSmall = true))
+    }
+
+    @Test
+    fun regularIndicatorIsVisiblyTallerThanSmallIndicator() {
+        assertEquals(2f, TabLayoutIndicatorPolicy.indicatorHeightDp(isSmall = false), 0f)
+        assertEquals(1f, TabLayoutIndicatorPolicy.indicatorHeightDp(isSmall = true), 0f)
+    }
 }

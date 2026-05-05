@@ -1,9 +1,10 @@
 package com.blanke.mdwechat.hookers.main
 
 import android.content.Context
-import android.os.Build
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -14,14 +15,18 @@ import com.blanke.mdwechat.Methods
 import com.blanke.mdwechat.Objects
 import com.blanke.mdwechat.Version
 import com.blanke.mdwechat.WechatGlobal
+import com.blanke.mdwechat.config.AppCustomConfig
 import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.hookers.StatusBarHooker
 import com.blanke.mdwechat.util.ConvertUtils
 import com.blanke.mdwechat.util.LogUtil
+import com.blanke.mdwechat.util.MaterialTabCustomIconPolicy
+import com.blanke.mdwechat.util.MaterialTabIconTintPolicy
 import com.blanke.mdwechat.util.ModuleContextCompat
 import com.blanke.mdwechat.util.NightModeUtils
 import com.blanke.mdwechat.util.RippleColorResolver
 import com.blanke.mdwechat.util.RuntimeProbe
+import com.blanke.mdwechat.util.TabLayoutIndicatorPolicy
 import com.blanke.mdwechat.util.ViewUtils
 import com.blanke.mdwechat.util.mainThread
 import com.blanke.mdwechat.widget.MaterialTabItem
@@ -91,11 +96,18 @@ object TabLayoutHook {
         R.drawable.ic_md_tab_me
     )
 
-    private fun tabItems() = tabTitles.mapIndexed { index, title ->
+    private fun tabItems(
+        customIconBitmaps: List<Bitmap?>
+    ) = tabTitles.mapIndexed { index, title ->
         MaterialTabItem(
             iconRes = fallbackTabIcons[index],
-            text = title
+            text = title,
+            iconBitmap = customIconBitmaps.getOrNull(index)
         )
+    }
+
+    private fun customTabIconBitmaps(): List<Bitmap?> {
+        return tabTitles.indices.map { index -> AppCustomConfig.getMaterialTabIcon(index) }
     }
 
     private fun getResourceEntryName(view: View): String? {
@@ -183,6 +195,22 @@ object TabLayoutHook {
     private fun newTabLayout(viewGroup: ViewGroup, indicatorGravity: Int = Gravity.BOTTOM, tabElevation: Float): MdMaterialTabLayout {
         val selectedColor = NightModeUtils.colorSecondary
         val unselectedColor = NightModeUtils.getTitleTextColor()
+        val tintSelectedIcon = NightModeUtils.is_tab_layout_main_page_filtered
+        val tintUnselectedIcon = NightModeUtils.is_tab_layout_filtered
+        val customIconBitmaps = customTabIconBitmaps()
+        val hasCustomIcons = customIconBitmaps.any { it != null }
+        val iconTintColors = MaterialTabIconTintPolicy.resolve(
+            selectedTextColor = selectedColor,
+            unselectedTextColor = unselectedColor,
+            tertiaryColor = NightModeUtils.colorTeritary,
+            tintSelectedIcon = tintSelectedIcon,
+            tintUnselectedIcon = tintUnselectedIcon
+        )
+        val iconTintEnabled = MaterialTabCustomIconPolicy.shouldTintIcons(
+            hasCustomIcons = hasCustomIcons,
+            tintSelectedIcon = tintSelectedIcon,
+            tintUnselectedIcon = tintUnselectedIcon
+        )
         val tipColor = HookConfig.get_color_tip_in_guide
         val rippleColor = if (HookConfig.is_hook_ripple) {
             RippleColorResolver.resolvePressedColor(HookConfig.get_color_ripple)
@@ -193,23 +221,35 @@ object TabLayoutHook {
             viewGroup.context,
             R.style.Theme_MDWechat_MaterialTabs
         )
-        val indicatorHeight = maxOf(1, ConvertUtils.dp2px(viewGroup.context, if (HookConfig.is_small_tab_bar_size) 0.5f else 1f))
+        val isSmallIndicator = HookConfig.is_small_tab_bar_size
+        val indicatorHeight = maxOf(
+            1,
+            ConvertUtils.dp2px(
+                viewGroup.context,
+                TabLayoutIndicatorPolicy.indicatorHeightDp(isSmallIndicator)
+            )
+        )
         logMaterialContextState("beforeCreate", context)
         try {
             return MdMaterialTabLayout(context).apply {
                 contentDescription = "MDWECHAT_TAB_OK"
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                 elevation = tabElevation
-                setTabItems(tabItems())
+                setTabItems(
+                    tabItems(customIconBitmaps)
+                )
                 configureAppearance(
                     selectedColor = selectedColor,
                     unselectedColor = unselectedColor,
+                    selectedIconColor = iconTintColors.selectedIconColor,
+                    unselectedIconColor = iconTintColors.unselectedIconColor,
                     indicatorColor = if (NightModeUtils.is_hook_tab_bar) selectedColor else Color.TRANSPARENT,
                     indicatorHeightPx = indicatorHeight,
                     rippleColor = rippleColor,
                     badgeBackgroundColor = tipColor,
                     badgeTextColor = HookConfig.get_color_tip_num_in_guide,
-                    indicatorOnContent = true
+                    indicatorOnContent = TabLayoutIndicatorPolicy.indicatorOnContent(isSmallIndicator),
+                    iconTintEnabled = iconTintEnabled
                 )
                 setOnTabSelected { position ->
                     LogUtil.log("tab click position=$position")

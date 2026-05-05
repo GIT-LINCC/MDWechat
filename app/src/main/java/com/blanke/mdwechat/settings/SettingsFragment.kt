@@ -27,6 +27,7 @@ import com.blanke.mdwechat.markdown.MarkDownActivity
 import com.blanke.mdwechat.settings.view.DownloadWechatDialog
 import com.blanke.mdwechat.util.FileUtils
 import com.blanke.mdwechat.util.LogUtil.clearFileLogs
+import com.blanke.mdwechat.util.MaterialTabCustomIconPolicy
 import com.blankj.utilcode.util.FileUtils.isFileExists
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
@@ -691,6 +692,11 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
             val file = File(getIconPath(Common.FILE_NAME_CHAT_BG))
             if (file.isFile && file.exists()) {
                 file.delete()
+            }
+            File(Common.APP_DIR_PATH + Common.ICON_DIR).listFiles()?.forEach { iconFile ->
+                if (MaterialTabCustomIconPolicy.isMaterialTabIconFileName(iconFile.name)) {
+                    iconFile.delete()
+                }
             }
         }
         Toast.makeText(activity, R.string.msg_reset_ok, Toast.LENGTH_SHORT).show()

@@ -2,6 +2,8 @@ package com.blanke.mdwechat.widget
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -19,7 +21,8 @@ import com.google.android.material.tabs.TabLayout
 
 data class MaterialTabItem(
     @DrawableRes val iconRes: Int,
-    val text: CharSequence
+    val text: CharSequence,
+    val iconBitmap: Bitmap? = null
 )
 
 class MdMaterialTabLayout @JvmOverloads constructor(
@@ -67,7 +70,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
         tabItems.forEach { item ->
             val tab = tabLayout.newTab()
                 .setText(item.text)
-                .setIcon(requireDrawable(item.iconRes).mutate())
+                .setIcon(requireDrawable(item).mutate())
             tab.contentDescription = item.text
             tabLayout.addTab(tab, false)
         }
@@ -78,16 +81,23 @@ class MdMaterialTabLayout @JvmOverloads constructor(
     fun configureAppearance(
         selectedColor: Int,
         unselectedColor: Int,
+        selectedIconColor: Int,
+        unselectedIconColor: Int,
         indicatorColor: Int,
         indicatorHeightPx: Int,
         rippleColor: Int,
         badgeBackgroundColor: Int,
         badgeTextColor: Int,
-        indicatorOnContent: Boolean
+        indicatorOnContent: Boolean,
+        iconTintEnabled: Boolean = true
     ) {
         val textColors = ColorStateList(
             arrayOf(intArrayOf(android.R.attr.state_selected), intArrayOf()),
             intArrayOf(selectedColor, unselectedColor)
+        )
+        val iconColors = ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_selected), intArrayOf()),
+            intArrayOf(selectedIconColor, unselectedIconColor)
         )
         this.selectedColor = selectedColor
         this.unselectedColor = unselectedColor
@@ -98,7 +108,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
         this.badgeBackgroundColor = badgeBackgroundColor
         this.badgeTextColor = badgeTextColor
         tabLayout.setTabTextColors(textColors)
-        tabLayout.tabIconTint = textColors
+        tabLayout.tabIconTint = if (iconTintEnabled) iconColors else null
         applyTabViewSpacing()
         for (index in 0 until tabLayout.tabCount) {
             val badge = tabLayout.getTabAt(index)?.badge
@@ -220,8 +230,9 @@ class MdMaterialTabLayout @JvmOverloads constructor(
         ).toInt()
     }
 
-    private fun requireDrawable(@DrawableRes drawableRes: Int): Drawable {
-        return AppCompatResources.getDrawable(context, drawableRes)
-            ?: error("Missing tab icon drawable: $drawableRes")
+    private fun requireDrawable(item: MaterialTabItem): Drawable {
+        item.iconBitmap?.let { return BitmapDrawable(resources, it) }
+        return AppCompatResources.getDrawable(context, item.iconRes)
+            ?: error("Missing tab icon drawable: ${item.iconRes}")
     }
 }

@@ -10,6 +10,7 @@ import com.blanke.mdwechat.bean.PicPosition
 import com.blanke.mdwechat.bean.PicPositionConfig
 import com.blanke.mdwechat.util.BitmapUtil
 import com.blanke.mdwechat.util.LogUtil
+import com.blanke.mdwechat.util.MaterialTabCustomIconPolicy
 import com.blankj.utilcode.util.CloseUtils
 import com.blankj.utilcode.util.FileIOUtils
 import com.google.gson.Gson
@@ -109,6 +110,18 @@ object AppCustomConfig {
 
     fun getTabIcon(index: Int): Bitmap? {
         return getScaleBitmap(getIcon(Common.FILE_NAME_TAB_PREFIX + "$index.png"))
+    }
+
+    fun getMaterialTabIcon(index: Int): Bitmap? {
+        val bitmap = getCustomizedExternalIcon(Common.FILE_NAME_TAB_PREFIX + "$index.png") ?: return null
+        val crop = MaterialTabCustomIconPolicy.cropWindow(bitmap.width, bitmap.height) ?: return null
+        val croppedBitmap = Bitmap.createBitmap(bitmap, crop.left, crop.top, crop.size, crop.size)
+        val outputSize = MaterialTabCustomIconPolicy.outputSizePx(bitmapScale)
+        return if (croppedBitmap.width == outputSize && croppedBitmap.height == outputSize) {
+            croppedBitmap
+        } else {
+            Bitmap.createScaledBitmap(croppedBitmap, outputSize, outputSize, true)
+        }
     }
 
     fun getRedPacketBubbleLeftIcon(): Bitmap? {
@@ -211,6 +224,30 @@ object AppCustomConfig {
         return openBundledAssetFromApk("${Common.ICON_DIR}/$fileName").useQuietly { input ->
             if (input == null) null else BitmapFactory.decodeStream(input)
         }
+    }
+
+    private fun getCustomizedExternalIcon(fileName: String): Bitmap? {
+        val iconFile = File(getIconPath(fileName))
+        val shouldUseExternalIcon = MaterialTabCustomIconPolicy.shouldUseExternalIcon(
+            hasExternalIcon = iconFile.isFile,
+            matchesBundledIcon = iconFile.isFile && iconFile.matchesBundledIcon(fileName)
+        )
+        if (!shouldUseExternalIcon) {
+            return null
+        }
+        return BitmapFactory.decodeFile(iconFile.absolutePath)
+    }
+
+    private fun File.matchesBundledIcon(fileName: String): Boolean {
+        val externalBytes = try {
+            readBytes()
+        } catch (_: Exception) {
+            return false
+        }
+        val bundledBytes = openBundledAssetFromApk("${Common.ICON_DIR}/$fileName").useQuietly { input ->
+            input?.readBytes()
+        } ?: return false
+        return externalBytes.contentEquals(bundledBytes)
     }
 
     fun getScaleBitmap(bitmap: Bitmap?): Bitmap? {
