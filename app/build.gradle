@@ -57,6 +57,7 @@ dependencies {
     implementation 'ru.noties:markwon:1.1.0'
     implementation 'ru.noties:markwon-image-loader:1.1.0'
     implementation project(path: ':takephoto-lib')
+    testImplementation 'junit:junit:4.13.2'
 //    implementation 'org.jooq:jooq:3.12.4'
 }
 
