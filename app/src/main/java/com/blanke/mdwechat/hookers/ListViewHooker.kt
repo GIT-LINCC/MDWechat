@@ -17,6 +17,7 @@ import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.hookers.base.Hooker
 import com.blanke.mdwechat.hookers.base.HookerProvider
 import com.blanke.mdwechat.hookers.main.BackgroundImageHook
+import com.blanke.mdwechat.util.ConversationRipplePolicy
 import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.NightModeUtils
 import com.blanke.mdwechat.util.ViewTreeUtils
@@ -31,6 +32,11 @@ object ListViewHooker : HookerProvider {
     private val excludeContext = arrayOf("com.tencent.mm.plugin.mall.ui.MallIndexUI")
     private const val keyBackgroundCloned = "mdwechat_background_cloned"
     private const val keyForegroundCloned = "mdwechat_foreground_cloned"
+    private const val keyConversationBaseBackground = "mdwechat_conversation_base_background"
+    private const val keyConversationColorBackgroundSnapshot = "mdwechat_conversation_color_background_snapshot"
+    private const val keyConversationOverlayRipple = "mdwechat_conversation_overlay_ripple"
+    private val conversationPressedState = intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed)
+    private val conversationEnabledState = intArrayOf(android.R.attr.state_enabled)
 
     private val titleTextColor: Int
         get() {
@@ -55,12 +61,35 @@ object ListViewHooker : HookerProvider {
 
     private fun newTransparentDrawable(): Drawable = ColorDrawable(Color.TRANSPARENT)
 
+    private fun isUsingOverlayConversationRipple(): Boolean {
+        return ConversationRipplePolicy.shouldUseOverlayRipple(
+                WechatGlobal.wxVersion,
+                Build.VERSION.SDK_INT
+        )
+    }
+
+    private fun isConversationItemView(view: View): Boolean {
+        return view.javaClass.name == VTTV.ConversationListViewItem.item.clazz
+    }
+
     fun prepareReusableItemView(view: View) {
         if (WechatGlobal.wxVersion!! < Version("8.0.49")) {
             return
         }
+        if (isUsingOverlayConversationRipple() && isConversationItemView(view)) {
+            clearConversationRowColorBackgroundSnapshots(view)
+            removeConversationOverlayRipple(view)
+            clearConversationOverlayInteraction(view)
+            return
+        }
         cloneStatefulBackgroundIfNeeded(view)
         cloneStatefulForegroundIfNeeded(view)
+        if (isUsingOverlayConversationRipple()) {
+            clearConversationColorBackgroundSnapshot(view)
+        } else {
+            restoreConversationColorBackground(view)
+        }
+        removeConversationOverlayRipple(view)
         clearInteractiveState(view)
         if (view is ViewGroup) {
             for (i in 0 until view.childCount) {
@@ -112,6 +141,200 @@ object ListViewHooker : HookerProvider {
             view.foreground?.jumpToCurrentState()
         }
         view.refreshDrawableState()
+    }
+
+    private fun copyDrawable(drawable: Drawable?, view: View): Drawable? {
+        if (drawable == null) {
+            return null
+        }
+        return drawable.constantState?.newDrawable(view.resources)?.mutate() ?: drawable.mutate()
+    }
+
+    private fun cacheConversationColorBackground(view: View) {
+        val background = view.background as? ColorDrawable ?: return
+        if (XposedHelpers.getAdditionalInstanceField(view, keyConversationColorBackgroundSnapshot) != null) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(
+                view,
+                keyConversationColorBackgroundSnapshot,
+                copyDrawable(background, view)
+        )
+    }
+
+    private fun restoreConversationColorBackground(view: View) {
+        val snapshot = XposedHelpers.getAdditionalInstanceField(view, keyConversationColorBackgroundSnapshot) as? Drawable
+                ?: return
+        view.background = copyDrawable(snapshot, view)
+    }
+
+    private fun clearConversationColorBackgroundSnapshot(view: View) {
+        XposedHelpers.removeAdditionalInstanceField(view, keyConversationColorBackgroundSnapshot)
+    }
+
+    private fun cacheConversationRowColorBackgrounds(view: View) {
+        cacheConversationColorBackground(view)
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                cacheConversationRowColorBackgrounds(view.getChildAt(i))
+            }
+        }
+    }
+
+    private fun restoreConversationRowColorBackgrounds(view: View) {
+        restoreConversationColorBackground(view)
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                restoreConversationRowColorBackgrounds(view.getChildAt(i))
+            }
+        }
+    }
+
+    private fun clearConversationRowColorBackgroundSnapshots(view: View) {
+        clearConversationColorBackgroundSnapshot(view)
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                clearConversationRowColorBackgroundSnapshots(view.getChildAt(i))
+            }
+        }
+    }
+
+    private fun clearConversationRowInteraction(view: View) {
+        clearInteractiveState(view)
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                clearConversationRowInteraction(view.getChildAt(i))
+            }
+        }
+    }
+
+    private fun clearConversationOverlayInteraction(view: View) {
+        view.isPressed = false
+        view.isSelected = false
+        view.isActivated = false
+        view.cancelLongPress()
+        view.clearFocus()
+        view.refreshDrawableState()
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                clearConversationOverlayInteraction(view.getChildAt(i))
+            }
+        }
+    }
+
+    private fun buildConversationItemBackground(view: View): Drawable {
+        val cachedBaseBackground = XposedHelpers.getAdditionalInstanceField(view, keyConversationBaseBackground) as? Drawable
+        val baseBackground = if (cachedBaseBackground != null) {
+            copyDrawable(cachedBaseBackground, view)
+        } else {
+            copyDrawable(view.background, view)?.also {
+                XposedHelpers.setAdditionalInstanceField(view, keyConversationBaseBackground, copyDrawable(it, view))
+            }
+        } ?: ColorDrawable(if (NightModeUtils.isWechatNightMode()) WeChatHelper.wechatDark else WeChatHelper.wechatWhite)
+
+        val backgroundAlpha = HookConfig.get_hook_conversation_background_alpha
+        if (backgroundAlpha > 0) {
+            baseBackground.alpha = backgroundAlpha
+        }
+        return baseBackground
+    }
+
+    private fun attachConversationOverlayRipple(view: View): Drawable {
+        val existing = XposedHelpers.getAdditionalInstanceField(view, keyConversationOverlayRipple) as? Drawable
+        if (existing != null) {
+            existing.setBounds(0, 0, view.width, view.height)
+            return existing
+        }
+        val overlayRipple = createItemRippleDrawable().mutate()
+        overlayRipple.setBounds(0, 0, view.width, view.height)
+        view.overlay.add(overlayRipple)
+        XposedHelpers.setAdditionalInstanceField(view, keyConversationOverlayRipple, overlayRipple)
+        return overlayRipple
+    }
+
+    private fun removeConversationOverlayRipple(view: View) {
+        val overlayRipple = XposedHelpers.getAdditionalInstanceField(view, keyConversationOverlayRipple) as? Drawable
+                ?: return
+        try {
+            view.overlay.remove(overlayRipple)
+        } catch (_: Throwable) {
+        }
+        XposedHelpers.removeAdditionalInstanceField(view, keyConversationOverlayRipple)
+        view.invalidate()
+    }
+
+    internal fun showConversationItemRipple(view: View, hotspotX: Float, hotspotY: Float) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return
+        }
+        removeConversationOverlayRipple(view)
+        val overlayRipple = attachConversationOverlayRipple(view)
+        overlayRipple.setBounds(0, 0, view.width, view.height)
+        overlayRipple.setHotspot(
+                hotspotX.coerceIn(0f, view.width.toFloat()),
+                hotspotY.coerceIn(0f, view.height.toFloat())
+        )
+        overlayRipple.state = conversationPressedState
+        view.invalidate()
+    }
+
+    internal fun ensureConversationItemRipple(view: View) {
+        if (isUsingOverlayConversationRipple()) {
+            clearConversationRowColorBackgroundSnapshots(view)
+            removeConversationOverlayRipple(view)
+            return
+        }
+        cacheConversationRowColorBackgrounds(view)
+
+        val useRootBackgroundRipple = ConversationRipplePolicy.shouldWrapRootBackground(
+                WechatGlobal.wxVersion,
+                Build.VERSION.SDK_INT
+        )
+        if (useRootBackgroundRipple) {
+            view.background = WeChatHelper.wrapItemBackgroundWithRipple(
+                    buildConversationItemBackground(view)
+            )
+        } else {
+            ViewUtils.getChildView1(view, VTTV.ConversationListViewItem.treeStacks["contentView"])?.apply {
+                isDuplicateParentStateEnabled = true
+                background = createItemRippleDrawable()
+            }
+        }
+    }
+
+    internal fun releaseConversationItemRipple(view: View) {
+        if (isUsingOverlayConversationRipple()) {
+            clearConversationOverlayInteraction(view)
+        } else {
+            restoreConversationRowColorBackgrounds(view)
+            clearConversationRowInteraction(view)
+        }
+        val overlayRipple = XposedHelpers.getAdditionalInstanceField(view, keyConversationOverlayRipple) as? Drawable
+                ?: return
+        overlayRipple.setBounds(0, 0, view.width, view.height)
+        overlayRipple.state = conversationEnabledState
+        view.invalidate()
+    }
+
+    internal fun resetConversationItemState(view: View) {
+        if (isUsingOverlayConversationRipple()) {
+            clearConversationRowColorBackgroundSnapshots(view)
+            clearConversationOverlayInteraction(view)
+        } else {
+            restoreConversationRowColorBackgrounds(view)
+            clearConversationRowInteraction(view)
+        }
+        removeConversationOverlayRipple(view)
+    }
+
+    internal fun resetVisibleConversationRows(listView: View?) {
+        val group = listView as? ViewGroup ?: return
+        for (i in 0 until group.childCount) {
+            val child = group.getChildAt(i)
+            if (child.javaClass.name == VTTV.ConversationListViewItem.item.clazz) {
+                resetConversationItemState(child)
+            }
+        }
     }
 
     private val listViewHook = Hooker {
@@ -845,16 +1068,6 @@ object ListViewHooker : HookerProvider {
                     // ConversationFragment 聊天列表 item
                     else if (ViewTreeUtils.equals(VTTV.ConversationListViewItem.item, view)) {
                         LogUtil.logOnlyOnce("ListViewHooker.ConversationListViewItem")
-                        try {
-                            val backgroundAlpha = HookConfig.get_hook_conversation_background_alpha
-                            if (backgroundAlpha > 0) {
-                                view.background?.constantState?.newDrawable()?.mutate()?.apply {
-                                    alpha = backgroundAlpha
-                                    view.background = this
-                                }
-                            }
-                        } catch (e: Exception) {
-                        }
                         val chatNameView = ViewUtils.getChildView1(view, VTTV.ConversationListViewItem.treeStacks["chatNameView"])
                         val chatTimeView = ViewUtils.getChildView1(view, VTTV.ConversationListViewItem.treeStacks["chatTimeView"])
                         val recentMsgView = ViewUtils.getChildView1(view, VTTV.ConversationListViewItem.treeStacks["recentMsgView"])
@@ -869,12 +1082,7 @@ object ListViewHooker : HookerProvider {
                         unreadCountView.backgroundTintList = ColorStateList.valueOf(NightModeUtils.colorTip)
                         unreadCountView.setTextColor(HookConfig.get_color_tip_num)
                         unreadView.backgroundTintList = ColorStateList.valueOf(NightModeUtils.colorTip)
-                        // 8.0.49 起这里已经是整块内容容器，继续强行替换背景会留下整片高亮色块。
-                        if (!shouldPreserveWeChatItemBackground) {
-                            ViewUtils.getChildView1(view, VTTV.ConversationListViewItem.treeStacks["contentView"])?.apply {
-                                this.background = createItemRippleDrawable()
-                            }
-                        }
+                        ensureConversationItemRipple(view)
                     }
                     //其他项, 背景置透明
                     // 联系人列表

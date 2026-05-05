@@ -12,7 +12,9 @@ import com.blanke.mdwechat.config.AppCustomConfig
 import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.util.ColorUtils
 import com.blanke.mdwechat.util.DrawableUtils
+import com.blanke.mdwechat.util.NightModeUtils
 import com.blanke.mdwechat.util.NightModeUtils.colorPrimary
+import com.blanke.mdwechat.util.RippleColorResolver
 import de.robv.android.xposed.XSharedPreferences
 import java.io.File
 
@@ -72,13 +74,19 @@ object WeChatHelper {
         if (!HookConfig.is_hook_ripple) {
             return ColorDrawable(Color.TRANSPARENT)
         }
-        val rippleColor = HookConfig.get_color_ripple
-        val resolvedRippleColor = if (Color.alpha(rippleColor) == 0xFF) {
-            Color.argb(0x33, Color.red(rippleColor), Color.green(rippleColor), Color.blue(rippleColor))
-        } else {
-            rippleColor
-        }
+        val resolvedRippleColor = RippleColorResolver.resolvePressedColor(HookConfig.get_color_ripple)
         return DrawableUtils.getTransparentColorRippleDrawable(Color.WHITE, resolvedRippleColor).mutate()
+    }
+
+    fun wrapItemBackgroundWithRipple(contentDrawable: Drawable?): Drawable {
+        val safeContentDrawable = contentDrawable ?: ColorDrawable(
+                if (NightModeUtils.isWechatNightMode()) wechatDark else wechatWhite
+        )
+        if (!HookConfig.is_hook_ripple) {
+            return safeContentDrawable
+        }
+        val resolvedRippleColor = RippleColorResolver.resolvePressedColor(HookConfig.get_color_ripple)
+        return DrawableUtils.wrapDrawableWithRipple(safeContentDrawable.mutate(), Color.WHITE, resolvedRippleColor).mutate()
     }
 
     fun getLeftRedPacketBubble(
