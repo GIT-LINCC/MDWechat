@@ -95,6 +95,18 @@ object TabLayoutHook {
         R.drawable.ic_md_tab_discover,
         R.drawable.ic_md_tab_me
     )
+    private val fallbackTabOutlineIcons = listOf(
+        R.drawable.ic_md_tab_chat_outline,
+        R.drawable.ic_md_tab_contacts_outline,
+        R.drawable.ic_md_tab_discover_outline,
+        R.drawable.ic_md_tab_me_outline
+    )
+    private val fallbackTabFilledIcons = listOf(
+        R.drawable.ic_md_tab_chat_filled,
+        R.drawable.ic_md_tab_contacts_filled,
+        R.drawable.ic_md_tab_discover_filled,
+        R.drawable.ic_md_tab_me_filled
+    )
 
     private fun tabItems(
         customIconBitmaps: List<Bitmap?>
@@ -102,7 +114,9 @@ object TabLayoutHook {
         MaterialTabItem(
             iconRes = fallbackTabIcons[index],
             text = title,
-            iconBitmap = customIconBitmaps.getOrNull(index)
+            iconBitmap = customIconBitmaps.getOrNull(index),
+            outlineIconRes = fallbackTabOutlineIcons[index],
+            filledIconRes = fallbackTabFilledIcons[index]
         )
     }
 
@@ -197,8 +211,8 @@ object TabLayoutHook {
         val unselectedColor = NightModeUtils.getTitleTextColor()
         val tintSelectedIcon = NightModeUtils.is_tab_layout_main_page_filtered
         val tintUnselectedIcon = NightModeUtils.is_tab_layout_filtered
-        val customIconBitmaps = customTabIconBitmaps()
-        val hasCustomIcons = customIconBitmaps.any { it != null }
+        val customIconBitmaps: List<Bitmap?> = List(tabTitles.size) { null }
+        val hasCustomIcons = false
         val iconTintColors = MaterialTabIconTintPolicy.resolve(
             selectedTextColor = selectedColor,
             unselectedTextColor = unselectedColor,
