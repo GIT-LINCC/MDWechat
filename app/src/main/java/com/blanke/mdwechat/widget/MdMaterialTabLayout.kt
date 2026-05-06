@@ -52,6 +52,8 @@ class MdMaterialTabLayout @JvmOverloads constructor(
     private var selectedPosition = -1
     private var selectedColor = MaterialTabIconTransitionPolicy.activeIconColor
     private var unselectedColor = MaterialTabIconTransitionPolicy.inactiveIconColor
+    private var selectedIconColor = MaterialTabIconTransitionPolicy.activeIconColor
+    private var unselectedIconColor = MaterialTabIconTransitionPolicy.inactiveIconColor
     private var activeContainerColor = PREVIEW_ACTIVE_CONTAINER
     private var activeContainerEnabled = true
     private var indicatorColor = Color.TRANSPARENT
@@ -111,12 +113,15 @@ class MdMaterialTabLayout @JvmOverloads constructor(
         badgeBackgroundColor: Int,
         badgeTextColor: Int,
         indicatorOnContent: Boolean,
+        activeContainerColor: Int = PREVIEW_ACTIVE_CONTAINER,
         activeContainerEnabled: Boolean = true,
         iconTintEnabled: Boolean = true
     ) {
-        this.selectedColor = MaterialTabIconTransitionPolicy.activeIconColor
-        this.unselectedColor = MaterialTabIconTransitionPolicy.inactiveIconColor
-        this.activeContainerColor = PREVIEW_ACTIVE_CONTAINER
+        this.selectedColor = selectedColor
+        this.unselectedColor = unselectedColor
+        this.selectedIconColor = selectedIconColor
+        this.unselectedIconColor = unselectedIconColor
+        this.activeContainerColor = activeContainerColor
         this.activeContainerEnabled = activeContainerEnabled
         this.indicatorColor = indicatorColor
         this.indicatorHeightCssPx = (indicatorHeightPx.toFloat() / resources.displayMetrics.density)
@@ -303,6 +308,8 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   --active-bg: ${activeBackgroundColor.toCssColor()};
                   --active-ink: ${selectedColor.toCssColor()};
                   --inactive-ink: ${unselectedColor.toCssColor()};
+                  --active-icon-ink: ${selectedIconColor.toCssColor()};
+                  --inactive-icon-ink: ${unselectedIconColor.toCssColor()};
                   --inactive-hover: #1f1f1f;
                   --badge-bg: ${badgeBackgroundColor.toCssColor()};
                   --badge-ink: ${badgeTextColor.toCssColor()};
@@ -482,6 +489,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   -webkit-font-feature-settings: "liga" 1;
                   -webkit-font-smoothing: antialiased;
                   transform-origin: center;
+                  color: var(--inactive-icon-ink);
                   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
                   transform: scale(1);
                   transition:
@@ -495,6 +503,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                 }
 
                 .tab.active .material-symbols-rounded {
+                  color: var(--active-icon-ink);
                   font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
                   transform: scale(1.08);
                 }

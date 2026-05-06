@@ -583,6 +583,20 @@
                 android:summary="@string/summary_hook_tab_pill"
                 android:title="@string/text_hook_tab_pill" />
             <SwitchPreference
+                android:defaultValue="false"
+                android:dependency="@string/key_hook_tab_pill"
+                android:key="@string/key_hook_tab_pill_color_custom"
+                android:summary="@string/summary_hook_tab_pill_color_custom"
+                android:title="@string/text_hook_tab_pill_color_custom" />
+            <com.jaredrummler.android.colorpicker.ColorPreference
+                android:defaultValue="@color/colorTransparent"
+                android:dependency="@string/key_hook_tab_pill_color_custom"
+                android:key="@string/key_hook_tab_pill_color"
+                android:summary="@string/summary_hook_tab_pill_color"
+                android:title="@string/text_hook_tab_pill_color"
+                app:cpv_colorPresets="@array/colors"
+                app:cpv_showAlphaSlider="true" />
+            <SwitchPreference
                 android:defaultValue="true"
                 android:dependency="@string/key_hook_tab"
                 android:key="@string/key_hook_tab_bar"

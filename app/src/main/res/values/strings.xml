@@ -194,6 +194,12 @@
     <string name="key_hook_tab_pill">key_hook_tab_pill</string>
     <string name="text_hook_tab_pill">TabLayout胶囊背景</string>
     <string name="summary_hook_tab_pill">TabLayout当前页的胶囊背景</string>
+    <string name="key_hook_tab_pill_color_custom">key_hook_tab_pill_color_custom</string>
+    <string name="text_hook_tab_pill_color_custom">自定义TabLayout胶囊颜色</string>
+    <string name="summary_hook_tab_pill_color_custom">关闭时默认跟随副色1生成半透明浅色</string>
+    <string name="key_hook_tab_pill_color">key_hook_tab_pill_color</string>
+    <string name="text_hook_tab_pill_color">TabLayout胶囊颜色</string>
+    <string name="summary_hook_tab_pill_color">开启自定义后使用此颜色；透明时仍跟随副色1</string>
     <string name="key_small_tab_bar_size">key_small_tab_bar_size</string>
     <string name="text_small_tab_bar_size">使用小号横杠</string>
     <string name="summary_small_tab_bar_size">使TabLayout当前页的横杠大小变扁</string>

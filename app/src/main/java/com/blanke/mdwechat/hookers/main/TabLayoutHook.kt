@@ -21,6 +21,7 @@ import com.blanke.mdwechat.hookers.StatusBarHooker
 import com.blanke.mdwechat.util.ConvertUtils
 import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.MaterialTabCustomIconPolicy
+import com.blanke.mdwechat.util.MaterialTabIconTransitionPolicy
 import com.blanke.mdwechat.util.MaterialTabIconTintPolicy
 import com.blanke.mdwechat.util.ModuleContextCompat
 import com.blanke.mdwechat.util.NightModeUtils
@@ -209,6 +210,16 @@ object TabLayoutHook {
     private fun newTabLayout(viewGroup: ViewGroup, indicatorGravity: Int = Gravity.BOTTOM, tabElevation: Float): MdMaterialTabLayout {
         val selectedColor = NightModeUtils.colorSecondary
         val unselectedColor = NightModeUtils.getTitleTextColor()
+        val defaultActiveContainerColor = MaterialTabIconTransitionPolicy.containerColor(selectedColor)
+        val customActiveContainerColor = HookConfig.get_hook_tab_pill_color
+        val activeContainerColor = if (
+            HookConfig.is_hook_tab_pill_color_custom &&
+            Color.alpha(customActiveContainerColor) > 0
+        ) {
+            customActiveContainerColor
+        } else {
+            defaultActiveContainerColor
+        }
         val tintSelectedIcon = NightModeUtils.is_tab_layout_main_page_filtered
         val tintUnselectedIcon = NightModeUtils.is_tab_layout_filtered
         val customIconBitmaps: List<Bitmap?> = List(tabTitles.size) { null }
@@ -263,6 +274,7 @@ object TabLayoutHook {
                     badgeBackgroundColor = tipColor,
                     badgeTextColor = HookConfig.get_color_tip_num_in_guide,
                     indicatorOnContent = TabLayoutIndicatorPolicy.indicatorOnContent(isSmallIndicator),
+                    activeContainerColor = activeContainerColor,
                     activeContainerEnabled = HookConfig.is_hook_tab_pill,
                     iconTintEnabled = iconTintEnabled
                 )
