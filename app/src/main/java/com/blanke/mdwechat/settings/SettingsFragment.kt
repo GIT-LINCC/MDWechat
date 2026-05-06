@@ -331,7 +331,8 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
                 findPreference(getString(R.string.key_hook_bg_immersion))?.apply { (this as SwitchPreference).isChecked = true }
                 //悬浮按钮
                 findPreference(getString(R.string.key_hook_float_button_color_is_secondary))?.apply { (this as SwitchPreference).isChecked = true }
-                //tablayout 横杠
+                //tablayout 胶囊和横杠
+                findPreference(getString(R.string.key_hook_tab_pill))?.apply { (this as SwitchPreference).isChecked = true }
                 findPreference(getString(R.string.key_hook_tab_bar))?.apply { (this as SwitchPreference).isChecked = true }
                 //tablayout 着色
                 findPreference(getString(R.string.key_tab_layout_main_page_filtered))?.apply { (this as SwitchPreference).isChecked = true }
@@ -379,7 +380,8 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
                 findPreference(getString(R.string.key_hook_bg_immersion))?.apply { (this as SwitchPreference).isChecked = true }
                 //悬浮按钮
                 findPreference(getString(R.string.key_hook_float_button_color_is_secondary))?.apply { (this as SwitchPreference).isChecked = true }
-                //tablayout 横杠
+                //tablayout 胶囊和横杠
+                findPreference(getString(R.string.key_hook_tab_pill))?.apply { (this as SwitchPreference).isChecked = true }
                 findPreference(getString(R.string.key_hook_tab_bar))?.apply { (this as SwitchPreference).isChecked = true }
                 //tablayout 着色
                 findPreference(getString(R.string.key_tab_layout_main_page_filtered))?.apply { (this as SwitchPreference).isChecked = true }
@@ -421,7 +423,8 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
                 findPreference(getString(R.string.key_hook_bg_immersion))?.apply { (this as SwitchPreference).isChecked = false }
                 //悬浮按钮
                 findPreference(getString(R.string.key_hook_float_button_color_is_secondary))?.apply { (this as SwitchPreference).isChecked = true }
-                //tablayout 横杠
+                //tablayout 胶囊和横杠
+                findPreference(getString(R.string.key_hook_tab_pill))?.apply { (this as SwitchPreference).isChecked = true }
                 findPreference(getString(R.string.key_hook_tab_bar))?.apply { (this as SwitchPreference).isChecked = false }
                 //tablayout 着色
                 findPreference(getString(R.string.key_tab_layout_main_page_filtered))?.apply { (this as SwitchPreference).isChecked = true }
@@ -463,7 +466,8 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
                 findPreference(getString(R.string.key_hook_bg_immersion))?.apply { (this as SwitchPreference).isChecked = false }
                 //悬浮按钮
                 findPreference(getString(R.string.key_hook_float_button_color_is_secondary))?.apply { (this as SwitchPreference).isChecked = true }
-                //tablayout 横杠
+                //tablayout 胶囊和横杠
+                findPreference(getString(R.string.key_hook_tab_pill))?.apply { (this as SwitchPreference).isChecked = true }
                 findPreference(getString(R.string.key_hook_tab_bar))?.apply { (this as SwitchPreference).isChecked = false }
                 //tablayout 着色
                 findPreference(getString(R.string.key_tab_layout_main_page_filtered))?.apply { (this as SwitchPreference).isChecked = true }
@@ -505,7 +509,8 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
                 findPreference(getString(R.string.key_hook_bg_immersion))?.apply { (this as SwitchPreference).isChecked = false }
                 //悬浮按钮
                 findPreference(getString(R.string.key_hook_float_button_color_is_secondary))?.apply { (this as SwitchPreference).isChecked = true }
-                //tablayout 横杠
+                //tablayout 胶囊和横杠
+                findPreference(getString(R.string.key_hook_tab_pill))?.apply { (this as SwitchPreference).isChecked = true }
                 findPreference(getString(R.string.key_hook_tab_bar))?.apply { (this as SwitchPreference).isChecked = true }
                 //tablayout 着色
                 findPreference(getString(R.string.key_tab_layout_main_page_filtered))?.apply { (this as SwitchPreference).isChecked = true }

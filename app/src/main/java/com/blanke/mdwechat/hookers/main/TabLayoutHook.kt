@@ -257,14 +257,16 @@ object TabLayoutHook {
                     unselectedColor = unselectedColor,
                     selectedIconColor = iconTintColors.selectedIconColor,
                     unselectedIconColor = iconTintColors.unselectedIconColor,
-                    indicatorColor = if (NightModeUtils.is_hook_tab_bar) selectedColor else Color.TRANSPARENT,
+                    indicatorColor = if (HookConfig.is_hook_tab_bar) selectedColor else Color.TRANSPARENT,
                     indicatorHeightPx = indicatorHeight,
                     rippleColor = rippleColor,
                     badgeBackgroundColor = tipColor,
                     badgeTextColor = HookConfig.get_color_tip_num_in_guide,
                     indicatorOnContent = TabLayoutIndicatorPolicy.indicatorOnContent(isSmallIndicator),
+                    activeContainerEnabled = HookConfig.is_hook_tab_pill,
                     iconTintEnabled = iconTintEnabled
                 )
+                setIndicatorGravity(indicatorGravity)
                 setOnTabSelected { position ->
                     LogUtil.log("tab click position=$position")
                     Objects.Main.LauncherUI_mViewPager?.apply {

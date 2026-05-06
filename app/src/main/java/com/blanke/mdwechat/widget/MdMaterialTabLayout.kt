@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.os.Build
 import android.util.Base64
 import android.util.AttributeSet
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -52,6 +53,10 @@ class MdMaterialTabLayout @JvmOverloads constructor(
     private var selectedColor = MaterialTabIconTransitionPolicy.activeIconColor
     private var unselectedColor = MaterialTabIconTransitionPolicy.inactiveIconColor
     private var activeContainerColor = PREVIEW_ACTIVE_CONTAINER
+    private var activeContainerEnabled = true
+    private var indicatorColor = Color.TRANSPARENT
+    private var indicatorHeightCssPx = 0f
+    private var indicatorGravity = Gravity.BOTTOM
     private var badgeBackgroundColor = PREVIEW_BADGE_COLOR
     private var badgeTextColor = Color.WHITE
     private var pageReady = false
@@ -105,13 +110,23 @@ class MdMaterialTabLayout @JvmOverloads constructor(
         badgeBackgroundColor: Int,
         badgeTextColor: Int,
         indicatorOnContent: Boolean,
+        activeContainerEnabled: Boolean = true,
         iconTintEnabled: Boolean = true
     ) {
         this.selectedColor = MaterialTabIconTransitionPolicy.activeIconColor
         this.unselectedColor = MaterialTabIconTransitionPolicy.inactiveIconColor
         this.activeContainerColor = PREVIEW_ACTIVE_CONTAINER
+        this.activeContainerEnabled = activeContainerEnabled
+        this.indicatorColor = indicatorColor
+        this.indicatorHeightCssPx = (indicatorHeightPx.toFloat() / resources.displayMetrics.density)
+            .coerceAtLeast(1f)
         this.badgeBackgroundColor = badgeBackgroundColor
         this.badgeTextColor = badgeTextColor
+        renderHtml()
+    }
+
+    fun setIndicatorGravity(gravity: Int) {
+        indicatorGravity = gravity
         renderHtml()
     }
 
@@ -255,6 +270,19 @@ class MdMaterialTabLayout @JvmOverloads constructor(
     }
 
     private fun buildHtml(): String {
+        val activeBackgroundColor = if (activeContainerEnabled) {
+            activeContainerColor
+        } else {
+            Color.TRANSPARENT
+        }
+        val indicatorEnabled = (indicatorColor ushr 24) != 0 && indicatorHeightCssPx > 0f
+        val indicatorDisplay = if (indicatorEnabled) "block" else "none"
+        val indicatorHeight = indicatorHeightCssPx.toJsNumber()
+        val indicatorPosition = when (indicatorGravity) {
+            Gravity.TOP -> "top: 0;"
+            Gravity.CENTER_VERTICAL -> "top: calc(50% - ${indicatorHeight}px / 2);"
+            else -> "bottom: 0;"
+        }
         return """
             <!doctype html>
             <html lang="zh-CN">
@@ -271,12 +299,15 @@ class MdMaterialTabLayout @JvmOverloads constructor(
 
                 :root {
                   --page-bg: ${PREVIEW_NAV_BACKGROUND.toCssColor()};
-                  --active-bg: ${activeContainerColor.toCssColor()};
+                  --active-bg: ${activeBackgroundColor.toCssColor()};
                   --active-ink: ${selectedColor.toCssColor()};
                   --inactive-ink: ${unselectedColor.toCssColor()};
                   --inactive-hover: #1f1f1f;
                   --badge-bg: ${badgeBackgroundColor.toCssColor()};
                   --badge-ink: ${badgeTextColor.toCssColor()};
+                  --badge-ring: #f3f4f9;
+                  --indicator-bg: ${indicatorColor.toCssColor()};
+                  --indicator-h: ${indicatorHeight}px;
                 }
 
                 * {
@@ -303,7 +334,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   display: flex;
                   align-items: center;
                   justify-content: space-between;
-                  padding: 0 8px 4px;
+                  padding: 2px 8px 3px;
                   background: var(--page-bg);
                   isolation: isolate;
                 }
@@ -317,8 +348,8 @@ class MdMaterialTabLayout @JvmOverloads constructor(
 
                 .sliding-pill {
                   position: absolute;
-                  width: 64px;
-                  height: 32px;
+                  width: 58px;
+                  height: 29px;
                   border-radius: 999px;
                   background: var(--active-bg);
                   opacity: 0;
@@ -344,6 +375,29 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   transition: none;
                 }
 
+                .indicator-bar {
+                  position: absolute;
+                  ${indicatorPosition}
+                  left: 0;
+                  z-index: 2;
+                  display: ${indicatorDisplay};
+                  width: 32px;
+                  height: var(--indicator-h);
+                  border-radius: 999px;
+                  background: var(--indicator-bg);
+                  pointer-events: none;
+                  transform: translateX(0px);
+                  transition:
+                    left 0.45s cubic-bezier(0.2, 0, 0, 1),
+                    transform 0.45s cubic-bezier(0.2, 0, 0, 1),
+                    opacity 0.18s ease;
+                }
+
+                .indicator-bar.no-transition,
+                .bottom-nav.swiping .indicator-bar {
+                  transition: none;
+                }
+
                 .tab {
                   position: relative;
                   z-index: 1;
@@ -363,9 +417,9 @@ class MdMaterialTabLayout @JvmOverloads constructor(
 
                 .icon-shell {
                   position: relative;
-                  width: 64px;
-                  height: 32px;
-                  margin-bottom: 4px;
+                  width: 58px;
+                  height: 29px;
+                  margin-bottom: 3px;
                   display: grid;
                   place-items: center;
                 }
@@ -411,13 +465,13 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   font-family: "Material Symbols Rounded";
                   font-weight: normal;
                   font-style: normal;
-                  font-size: 26px;
+                  font-size: 24px;
                   line-height: 1;
                   letter-spacing: normal;
                   text-transform: none;
                   display: inline-block;
-                  width: 26px;
-                  height: 26px;
+                  width: 24px;
+                  height: 24px;
                   overflow: hidden;
                   text-align: center;
                   white-space: nowrap;
@@ -441,7 +495,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
 
                 .tab.active .material-symbols-rounded {
                   font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
-                  transform: scale(1.15);
+                  transform: scale(1.08);
                 }
 
                 .label {
@@ -459,12 +513,12 @@ class MdMaterialTabLayout @JvmOverloads constructor(
 
                 .badge {
                   position: absolute;
-                  top: -6px;
-                  right: -8px;
+                  top: -4px;
+                  right: -7px;
                   z-index: 2;
                   min-width: 16px;
                   padding: 1px 5px;
-                  border: 2px solid var(--page-bg);
+                  border: 2px solid var(--badge-ring);
                   border-radius: 999px;
                   background: var(--badge-bg);
                   color: var(--badge-ink);
@@ -486,31 +540,31 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                 }
 
                 @keyframes chat-jelly {
-                  0% { transform: scale(1.15) rotate(0deg); }
-                  30% { transform: scale(1.08, 0.98) rotate(-5deg); }
-                  60% { transform: scale(1.14, 1.27) rotate(5deg); }
-                  80% { transform: scale(1.09) rotate(-2deg); }
-                  100% { transform: scale(1.15) rotate(0deg); }
+                  0% { transform: scale(1.08) rotate(0deg); }
+                  30% { transform: scale(1.02, 0.94) rotate(-5deg); }
+                  60% { transform: scale(1.08, 1.18) rotate(5deg); }
+                  80% { transform: scale(1.03) rotate(-2deg); }
+                  100% { transform: scale(1.08) rotate(0deg); }
                 }
 
                 @keyframes contact-card-flip {
-                  0% { transform: perspective(400px) rotateY(0deg) scale(1.15); }
-                  50% { transform: perspective(400px) rotateY(180deg) scale(1.25); }
-                  100% { transform: perspective(400px) rotateY(360deg) scale(1.15); }
+                  0% { transform: perspective(400px) rotateY(0deg) scale(1.08); }
+                  50% { transform: perspective(400px) rotateY(180deg) scale(1.16); }
+                  100% { transform: perspective(400px) rotateY(360deg) scale(1.08); }
                 }
 
                 @keyframes compass-needle-spin {
-                  0% { transform: rotate(0deg) scale(1.15); }
-                  60% { transform: rotate(390deg) scale(1.15); }
-                  80% { transform: rotate(350deg) scale(1.15); }
-                  100% { transform: rotate(360deg) scale(1.15); }
+                  0% { transform: rotate(0deg) scale(1.08); }
+                  60% { transform: rotate(390deg) scale(1.08); }
+                  80% { transform: rotate(350deg) scale(1.08); }
+                  100% { transform: rotate(360deg) scale(1.08); }
                 }
 
                 @keyframes person-bounce {
-                  0% { transform: translateY(0) scale(1.15); }
-                  40% { transform: translateY(-4px) scale(1.09, 1.32); }
-                  70% { transform: translateY(1px) scale(1.21, 1.09); }
-                  100% { transform: translateY(0) scale(1.15); }
+                  0% { transform: translateY(0) scale(1.08); }
+                  40% { transform: translateY(-3px) scale(1.02, 1.21); }
+                  70% { transform: translateY(1px) scale(1.14, 1.03); }
+                  100% { transform: translateY(0) scale(1.08); }
                 }
 
                 .tab.play-motion .chat-motion {
@@ -534,12 +588,14 @@ class MdMaterialTabLayout @JvmOverloads constructor(
             <body>
               <nav class="bottom-nav no-animation" aria-label="底部导航">
                 <span class="sliding-pill no-transition" aria-hidden="true"></span>
+                <span class="indicator-bar no-transition" aria-hidden="true"></span>
                 ${buildTabsMarkup()}
               </nav>
 
               <script>
                 const bottomNav = document.querySelector(".bottom-nav");
                 const slidingPill = document.querySelector(".sliding-pill");
+                const indicatorBar = document.querySelector(".indicator-bar");
                 const tabs = Array.from(document.querySelectorAll(".tab"));
                 let activeIndex = ${if (selectedPosition in items.indices) selectedPosition else -1};
                 let pointerStartX = 0;
@@ -565,6 +621,29 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                     left: shellRect.left - navRect.left,
                     top: shellRect.top - navRect.top,
                   };
+                };
+
+                const getIndicatorPosition = (tab) => {
+                  if (!bottomNav || !tab || !indicatorBar) return null;
+                  const navRect = bottomNav.getBoundingClientRect();
+                  const tabRect = tab.getBoundingClientRect();
+                  const barRect = indicatorBar.getBoundingClientRect();
+                  return {
+                    left: tabRect.left - navRect.left + tabRect.width / 2 - barRect.width / 2,
+                  };
+                };
+
+                const moveIndicatorToTab = (tab, animate = true, offsetX = 0) => {
+                  const position = getIndicatorPosition(tab);
+                  if (!indicatorBar || !position) return;
+                  if (!animate) indicatorBar.classList.add("no-transition");
+                  indicatorBar.style.left = `${'$'}{position.left}px`;
+                  indicatorBar.style.transform = `translateX(${'$'}{offsetX}px)`;
+                  if (!animate) {
+                    window.requestAnimationFrame(() => {
+                      indicatorBar.classList.remove("no-transition");
+                    });
+                  }
                 };
 
                 const moveSlidingPillToTab = (tab, animate = true, offsetX = 0) => {
@@ -600,14 +679,15 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   slidingPill.style.left = `${'$'}{targetPosition.left}px`;
                   slidingPill.style.top = `${'$'}{targetPosition.top}px`;
                   slidingPill.style.transform = `translateX(${'$'}{visualLeft - targetPosition.left}px)`;
+                  moveIndicatorToTab(tabs[targetIndex], false, visualLeft - targetPosition.left);
 
                   window.requestAnimationFrame(() => {
                     slidingPill.classList.remove("no-transition");
                     slidingPill.style.transform = "translateX(0px)";
+                    if (indicatorBar) indicatorBar.style.transform = "translateX(0px)";
                   });
 
                   settleTimer = window.setTimeout(() => {
-                    bottomNav.classList.remove("swipe-settle");
                     settleTimer = 0;
                   }, 460);
                 };
@@ -627,8 +707,10 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   tabs.forEach((item) => item.classList.remove("active", "play-motion"));
                   bottomNav.classList.remove("swiping", "swipe-settle");
                   slidingPill.style.transform = "translateX(0px)";
+                  if (indicatorBar) indicatorBar.style.transform = "translateX(0px)";
                   tab.classList.add("active");
                   activeIndex = targetIndex;
+                  moveIndicatorToTab(tab, true);
                   pagerSwipeActive = false;
                   if (animateIcon) playSelectedMotion(targetIndex);
                 };
@@ -652,6 +734,8 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                     bottomNav.classList.remove("swiping", "swipe-settle");
                     slidingPill.style.transform = "translateX(0px)";
                     moveSlidingPillToTab(tabs[targetIndex], false);
+                    if (indicatorBar) indicatorBar.style.transform = "translateX(0px)";
+                    moveIndicatorToTab(tabs[targetIndex], false);
                     activeIndex = targetIndex;
                     pagerSwipeActive = false;
                     window.requestAnimationFrame(() => {
@@ -670,6 +754,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   if (fraction <= 0) {
                     if (!pagerSwipeActive) return;
                     bottomNav.classList.remove("swiping");
+                    moveIndicatorToTab(tabs[activeIndex] || tabs[startIndex], false);
                     pagerSwipeActive = false;
                     return;
                   }
@@ -687,9 +772,9 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   pagerSwipePreviewOffset = previewOffset;
                   pagerSwipeActive = true;
                   bottomNav.classList.add("swiping");
-                  bottomNav.classList.remove("swipe-settle");
                   moveSlidingPillToTab(tabs[fromIndex], false);
                   slidingPill.style.transform = `translateX(${'$'}{previewOffset}px)`;
+                  moveIndicatorToTab(tabs[fromIndex], false, previewOffset);
                 };
 
                 const notifyNativeSelection = (targetIndex) => {
@@ -706,10 +791,10 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   pointerActiveIndex = startIndex;
                   pointerPreviewOffset = previewOffset;
                   bottomNav.classList.add("swiping");
-                  bottomNav.classList.remove("swipe-settle");
                   pagerSwipeActive = false;
                   moveSlidingPillToTab(tabs[startIndex], false);
                   slidingPill.style.transform = `translateX(${'$'}{previewOffset}px)`;
+                  moveIndicatorToTab(tabs[startIndex], false, previewOffset);
                 };
 
                 const finishNativeSwipe = (fromIndex, targetIndex, fromOffsetX) => {
@@ -760,6 +845,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                     isDragging = true;
                     bottomNav.classList.add("swiping");
                     moveSlidingPillToTab(tabs[Math.max(0, pointerActiveIndex)], false);
+                    moveIndicatorToTab(tabs[Math.max(0, pointerActiveIndex)], false);
                     document.body.setPointerCapture?.(event.pointerId);
                   }
 
@@ -770,6 +856,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
                   const boundedOffset = Math.max(-tabWidth, Math.min(tabWidth, pointerDeltaX));
                   pointerPreviewOffset = -boundedOffset;
                   slidingPill.style.transform = `translateX(${'$'}{pointerPreviewOffset}px)`;
+                  if (indicatorBar) indicatorBar.style.transform = `translateX(${'$'}{pointerPreviewOffset}px)`;
                 };
 
                 const finishPointerSwipe = (event) => {
@@ -873,6 +960,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
 
                 window.addEventListener("resize", () => {
                   moveSlidingPillToTab(tabs[activeIndex] || tabs[0], false);
+                  moveIndicatorToTab(tabs[activeIndex] || tabs[0], false);
                 });
               </script>
             </body>
@@ -1109,7 +1197,7 @@ class MdMaterialTabLayout @JvmOverloads constructor(
     companion object {
         private const val FONT_ASSET_PATH = "tablayout/material-symbols-rounded-latin-fill-normal.woff2"
         private const val PREVIEW_ACTIVE_CONTAINER = 0xFFC2E7FF.toInt()
-        private const val PREVIEW_NAV_BACKGROUND = 0xFFF3F4F9.toInt()
+        private const val PREVIEW_NAV_BACKGROUND = 0x00000000
         private const val PREVIEW_BADGE_COLOR = 0xFFB3261E.toInt()
     }
 }

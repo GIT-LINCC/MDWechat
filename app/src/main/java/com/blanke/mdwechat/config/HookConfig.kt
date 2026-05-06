@@ -57,6 +57,7 @@ object HookConfig {
     private val key_hook_hide_wx_tab_2 = "key_hook_hide_wx_tab_2"
     private val key_hook_hide_wx_tab_3 = "key_hook_hide_wx_tab_3"
     private val key_hook_tab_elevation = "key_hook_tab_elevation"
+    private val key_hook_tab_pill = "key_hook_tab_pill"
     private val key_hook_tab_bar = "key_hook_tab_bar"
     private val key_small_tab_bar_size = "key_small_tab_bar_size"
     private val key_hook_menu_game = "key_hook_menu_game"
@@ -287,6 +288,10 @@ object HookConfig {
     val is_hook_tab_elevation: Boolean
         get() {
             return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_tab_elevation, false)
+        }
+    val is_hook_tab_pill: Boolean
+        get() {
+            return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_tab_pill, true)
         }
     val is_hook_tab_bar: Boolean
         get() {

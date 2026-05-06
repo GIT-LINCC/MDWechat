@@ -579,6 +579,12 @@
             <SwitchPreference
                 android:defaultValue="true"
                 android:dependency="@string/key_hook_tab"
+                android:key="@string/key_hook_tab_pill"
+                android:summary="@string/summary_hook_tab_pill"
+                android:title="@string/text_hook_tab_pill" />
+            <SwitchPreference
+                android:defaultValue="true"
+                android:dependency="@string/key_hook_tab"
                 android:key="@string/key_hook_tab_bar"
                 android:summary="@string/summary_hook_tab_bar"
                 android:title="@string/text_hook_tab_bar" />

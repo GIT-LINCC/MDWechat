@@ -191,6 +191,9 @@
     <string name="key_hook_tab_bar">key_hook_tab_bar</string>
     <string name="text_hook_tab_bar">TabLayout横杠</string>
     <string name="summary_hook_tab_bar">TabLayout当前页的横杠</string>
+    <string name="key_hook_tab_pill">key_hook_tab_pill</string>
+    <string name="text_hook_tab_pill">TabLayout胶囊背景</string>
+    <string name="summary_hook_tab_pill">TabLayout当前页的胶囊背景</string>
     <string name="key_small_tab_bar_size">key_small_tab_bar_size</string>
     <string name="text_small_tab_bar_size">使用小号横杠</string>
     <string name="summary_small_tab_bar_size">使TabLayout当前页的横杠大小变扁</string>
