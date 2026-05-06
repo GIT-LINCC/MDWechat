@@ -17,6 +17,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.annotation.DrawableRes
+import com.blanke.mdwechat.Objects
 import com.blanke.mdwechat.util.MaterialTabBadgePolicy
 import com.blanke.mdwechat.util.MaterialTabIconTransitionPolicy
 import com.blanke.mdwechat.util.TabLayoutIndicatorPolicy
@@ -24,7 +25,6 @@ import com.google.android.material.tabs.TabLayout
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 
 data class MaterialTabItem(
     @DrawableRes val iconRes: Int,
@@ -63,8 +63,9 @@ class MdMaterialTabLayout @JvmOverloads constructor(
     private var pendingSelectionSource = MaterialTabIconTransitionPolicy.SelectionSource.PROGRAMMATIC
     private var touchStartX = 0f
     private var touchStartY = 0f
-    private var touchActiveIndex = -1
+    private var touchStartRawX = 0f
     private var touchDragging = false
+    private var touchForwardingSwipe = false
     private val touchSlop = max(
         ViewConfiguration.get(context).scaledTouchSlop,
         dp(18f).toInt()
@@ -1030,94 +1031,104 @@ class MdMaterialTabLayout @JvmOverloads constructor(
     private fun handleTouchLayerTouch(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                startNativeTouch(event.x, event.y)
+                startNativeTouch(event)
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                updateNativeTouch(event.x, event.y)
+                updateNativeTouch(event)
                 return true
             }
             MotionEvent.ACTION_UP -> {
                 parent?.requestDisallowInterceptTouchEvent(false)
+                if (touchForwardingSwipe) {
+                    forwardTouchToViewPager(event, MotionEvent.ACTION_UP)
+                    finishNativeTouch()
+                    return true
+                }
                 if (touchDragging) {
-                    finishNativeSwipe(event.x - touchStartX)
+                    finishNativeTouch()
                     return true
                 }
                 finishNativeTap(event.x)
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
-                if (touchDragging) {
-                    cancelNativeTouch()
-                    return true
-                }
                 parent?.requestDisallowInterceptTouchEvent(false)
+                if (touchForwardingSwipe) {
+                    forwardTouchToViewPager(event, MotionEvent.ACTION_CANCEL)
+                }
+                finishNativeTouch()
                 return true
             }
         }
         return true
     }
 
-    private fun startNativeTouch(x: Float, y: Float) {
-        touchStartX = x
-        touchStartY = y
-        touchActiveIndex = selectedPosition
+    private fun startNativeTouch(event: MotionEvent) {
+        touchStartX = event.x
+        touchStartY = event.y
+        touchStartRawX = event.rawX
         touchDragging = false
-        parent?.requestDisallowInterceptTouchEvent(true)
+        touchForwardingSwipe = false
+        parent?.requestDisallowInterceptTouchEvent(false)
     }
 
-    private fun updateNativeTouch(x: Float, y: Float): Boolean {
-        val deltaX = x - touchStartX
-        val deltaY = y - touchStartY
+    private fun updateNativeTouch(event: MotionEvent) {
+        val deltaX = event.x - touchStartX
+        val deltaY = event.y - touchStartY
         val absX = abs(deltaX)
         val absY = abs(deltaY)
-        if (!touchDragging && absX > touchSlop && absX > absY * 1.15f) {
+        val movedPastTap = deltaX * deltaX + deltaY * deltaY > touchSlop * touchSlop
+        if (movedPastTap) {
             touchDragging = true
-            touchActiveIndex = selectedPosition.coerceTabIndex()
         }
-        if (!touchDragging) {
+        if (!touchForwardingSwipe && absX > touchSlop && absX > absY * 1.15f) {
+            touchForwardingSwipe = true
+            parent?.requestDisallowInterceptTouchEvent(true)
+            forwardTouchToViewPager(event, MotionEvent.ACTION_DOWN, touchStartRawX)
+        }
+        if (touchForwardingSwipe) {
+            forwardTouchToViewPager(event, MotionEvent.ACTION_MOVE)
+        }
+        parent?.requestDisallowInterceptTouchEvent(touchForwardingSwipe)
+    }
+
+    private fun finishNativeTouch() {
+        touchDragging = false
+        touchForwardingSwipe = false
+        parent?.requestDisallowInterceptTouchEvent(false)
+    }
+
+    private fun forwardTouchToViewPager(
+        sourceEvent: MotionEvent,
+        action: Int,
+        rawXOverride: Float? = null
+    ): Boolean {
+        val viewPager = Objects.Main.LauncherUI_mViewPager ?: return false
+        if (viewPager.width <= 0 || viewPager.height <= 0) {
             return false
         }
-        parent?.requestDisallowInterceptTouchEvent(true)
-        runJs(
-            "window.MDWechatTabs && window.MDWechatTabs.previewNativeSwipe(" +
-                "${touchActiveIndex.coerceAtLeast(0)}, ${deltaX.toJsNumber()});"
+        val location = IntArray(2)
+        viewPager.getLocationOnScreen(location)
+        val rawX = rawXOverride ?: sourceEvent.rawX
+        val targetX = rawX - location[0]
+        val targetY = viewPager.height / 2f
+        val eventTime = if (action == MotionEvent.ACTION_DOWN) {
+            sourceEvent.downTime
+        } else {
+            sourceEvent.eventTime
+        }
+        val forwarded = MotionEvent.obtain(
+            sourceEvent.downTime,
+            eventTime,
+            action,
+            targetX,
+            targetY,
+            sourceEvent.metaState
         )
-        return true
-    }
-
-    private fun cancelNativeTouch() {
-        parent?.requestDisallowInterceptTouchEvent(false)
-        touchDragging = false
-        runJs("window.MDWechatTabs && window.MDWechatTabs.cancelNativeSwipe();")
-    }
-
-    private fun finishNativeSwipe(deltaX: Float) {
-        if (items.isEmpty()) {
-            touchDragging = false
-            return
-        }
-        val startIndex = touchActiveIndex.coerceTabIndex()
-        val tabWidth = if (items.isNotEmpty()) width.toFloat() / items.size else width.toFloat()
-        val boundedDeltaX = deltaX.coerceIn(-tabWidth, tabWidth)
-        val previewOffsetX = -boundedDeltaX
-        val threshold = max(dp(38f), min(dp(64f), tabWidth * 0.28f))
-        val targetIndex = when {
-            deltaX <= -threshold -> (startIndex + 1).coerceAtMost(items.lastIndex)
-            deltaX >= threshold -> (startIndex - 1).coerceAtLeast(0)
-            else -> startIndex
-        }
-        touchDragging = false
-        val changed = targetIndex != selectedPosition
-        selectedPosition = targetIndex
-        pendingSelectionSource = MaterialTabIconTransitionPolicy.SelectionSource.PROGRAMMATIC
-        runJs(
-            "window.MDWechatTabs && window.MDWechatTabs.finishNativeSwipe(" +
-                "$startIndex, $targetIndex, ${previewOffsetX.toJsNumber()});"
-        )
-        if (changed) {
-            onTabSelected?.invoke(targetIndex)
-        }
+        val handled = viewPager.dispatchTouchEvent(forwarded)
+        forwarded.recycle()
+        return handled
     }
 
     private fun finishNativeTap(x: Float) {
@@ -1169,13 +1180,6 @@ class MdMaterialTabLayout @JvmOverloads constructor(
 
     private fun dp(value: Float): Float {
         return value * resources.displayMetrics.density
-    }
-
-    private fun Int.coerceTabIndex(): Int {
-        if (items.isEmpty()) {
-            return 0
-        }
-        return coerceIn(0, items.lastIndex)
     }
 
     private fun tabIndexAt(x: Float): Int {
