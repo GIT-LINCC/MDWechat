@@ -2,6 +2,7 @@ package com.blanke.mdwechat.util
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -144,6 +145,125 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
+    fun defaultBubblePaletteKeepsModernColorsAndRemovesWhiteOutline() {
+        val right = ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.RIGHT)
+        val left = ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.LEFT)
+
+        assertEquals(ChatBubbleStylePolicy.DEFAULT_RIGHT_BUBBLE_COLOR, right.bubbleColor)
+        assertEquals(ChatBubbleStylePolicy.DEFAULT_RIGHT_TEXT_COLOR, right.textColor)
+        assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, right.strokeColor)
+        assertEquals(0f, right.strokeWidthDp, 0f)
+        assertEquals(ChatBubbleStylePolicy.DEFAULT_LEFT_BUBBLE_COLOR, left.bubbleColor)
+        assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, left.strokeColor)
+        assertEquals(0f, left.strokeWidthDp, 0f)
+    }
+
+    @Test
+    fun customBubbleTintOverridesSideFillColors() {
+        val config = ChatBubbleStylePolicy.BubbleColorConfig(
+            useCustomBubbleTint = true,
+            leftBubbleTint = 0xFF112233.toInt(),
+            rightBubbleTint = 0xFF445566.toInt()
+        )
+
+        assertEquals(
+            0xFF112233.toInt(),
+            ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.LEFT, config).bubbleColor
+        )
+        assertEquals(
+            0xFF445566.toInt(),
+            ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.RIGHT, config).bubbleColor
+        )
+    }
+
+    @Test
+    fun customTextColorsOverrideSideTextColors() {
+        val config = ChatBubbleStylePolicy.BubbleColorConfig(
+            useCustomTextColor = true,
+            leftTextColor = 0xFFABCDEF.toInt(),
+            rightTextColor = 0xFF123456.toInt()
+        )
+
+        assertEquals(
+            0xFFABCDEF.toInt(),
+            ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.LEFT, config).textColor
+        )
+        assertEquals(
+            0xFF123456.toInt(),
+            ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.RIGHT, config).textColor
+        )
+    }
+
+    @Test
+    fun paletteSignatureChangesWhenCustomColorsChange() {
+        val first = ChatBubbleStylePolicy.bubblePalette(
+            ChatBubbleStylePolicy.Side.RIGHT,
+            ChatBubbleStylePolicy.BubbleColorConfig(
+                useCustomBubbleTint = true,
+                rightBubbleTint = 0xFF445566.toInt()
+            )
+        )
+        val second = ChatBubbleStylePolicy.bubblePalette(
+            ChatBubbleStylePolicy.Side.RIGHT,
+            ChatBubbleStylePolicy.BubbleColorConfig(
+                useCustomBubbleTint = true,
+                rightBubbleTint = 0xFF667788.toInt()
+            )
+        )
+
+        assertNotEquals(first.signature, second.signature)
+    }
+
+    @Test
+    fun cachedRightBubbleShapeCanGrowWhenNewNeighborArrives() {
+        assertTrue(
+            ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
+                ChatBubbleStylePolicy.Side.RIGHT,
+                ChatBubbleStylePolicy.GroupPosition.SINGLE,
+                ChatBubbleStylePolicy.GroupPosition.TOP
+            )
+        )
+        assertTrue(
+            ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
+                ChatBubbleStylePolicy.Side.RIGHT,
+                ChatBubbleStylePolicy.GroupPosition.BOTTOM,
+                ChatBubbleStylePolicy.GroupPosition.MIDDLE
+            )
+        )
+        assertFalse(
+            ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
+                ChatBubbleStylePolicy.Side.RIGHT,
+                ChatBubbleStylePolicy.GroupPosition.MIDDLE,
+                ChatBubbleStylePolicy.GroupPosition.BOTTOM
+            )
+        )
+        assertFalse(
+            ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
+                ChatBubbleStylePolicy.Side.LEFT,
+                ChatBubbleStylePolicy.GroupPosition.SINGLE,
+                ChatBubbleStylePolicy.GroupPosition.TOP
+            )
+        )
+    }
+
+    @Test
+    fun appendedRightMessageRegroupsExistingSingleMessage() {
+        val before = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(row("1", ChatBubbleStylePolicy.Side.RIGHT, "self", 1_000L, "test"))
+        )
+        val after = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(
+                row("1", ChatBubbleStylePolicy.Side.RIGHT, "self", 1_000L, "test"),
+                row("2", ChatBubbleStylePolicy.Side.RIGHT, "self", 2_000L, "test")
+            )
+        )
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.SINGLE, before.getValue("1").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, after.getValue("1").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, after.getValue("2").position)
+    }
+
+    @Test
     fun leftMessagesNeedKnownSenderBeforeGrouping() {
         val left = ChatBubbleStylePolicy.MessageCandidate(
             isTextMessage = true,
@@ -234,6 +354,39 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
+    fun nonTextMessagesStopRenderStateGrouping() {
+        val rows = listOf(
+            row("1", ChatBubbleStylePolicy.Side.RIGHT, "self", 1_000L, "a"),
+            row("2", ChatBubbleStylePolicy.Side.RIGHT, "self", 2_000L, "b"),
+            row("img", ChatBubbleStylePolicy.Side.RIGHT, "self", 3_000L, "[image]", isTextMessage = false)
+        )
+
+        val states = ChatBubbleStylePolicy.resolveRenderStates(rows)
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("1").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("2").position)
+        assertFalse(states.containsKey("img"))
+    }
+
+    @Test
+    fun wechatImageXmlIsNotTextLikeWhenTypeIsMissing() {
+        assertFalse(
+            ChatBubbleStylePolicy.isTextLikeWechatMessage(
+                null,
+                "wxid_abc:\n<msg><img aeskey=\"x\" /></msg>"
+            )
+        )
+        assertFalse(ChatBubbleStylePolicy.isTextLikeWechatMessage(null, null))
+        assertTrue(ChatBubbleStylePolicy.isTextLikeWechatMessage(null, "plain text"))
+        assertTrue(
+            ChatBubbleStylePolicy.isTextLikeWechatMessage(
+                49,
+                "<msg><appmsg><refermsg><content>reply</content></refermsg></appmsg></msg>"
+            )
+        )
+    }
+
+    @Test
     fun renderStatesCarryVisualContractForNativePainter() {
         val rows = listOf(
             row("1", ChatBubbleStylePolicy.Side.LEFT, "alice", 1_000L, "a"),
@@ -255,11 +408,12 @@ class ChatBubbleStylePolicyTest {
         side: ChatBubbleStylePolicy.Side,
         senderKey: String?,
         createTimeMs: Long,
-        text: String
+        text: String,
+        isTextMessage: Boolean = true
     ): ChatBubbleStylePolicy.MessageRow {
         return ChatBubbleStylePolicy.MessageRow(
             stableKey = stableKey,
-            isTextMessage = true,
+            isTextMessage = isTextMessage,
             side = side,
             senderKey = senderKey,
             createTimeMs = createTimeMs,

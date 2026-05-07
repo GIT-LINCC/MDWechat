@@ -1,5 +1,6 @@
 package com.blanke.mdwechat.hookers
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -10,34 +11,44 @@ import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
+import android.view.animation.DecelerateInterpolator
 import com.blanke.mdwechat.util.ChatBubbleStylePolicy
-import com.blanke.mdwechat.util.ChatBubbleStylePolicy.Side
 
 class ModernBubbleDrawable(
     context: Context,
-    private val state: ChatBubbleStylePolicy.RenderState
+    initialState: ChatBubbleStylePolicy.RenderState,
+    initialPalette: ChatBubbleStylePolicy.BubblePalette
 ) : Drawable() {
     private val density = context.resources.displayMetrics.density
-    private val baseColor = if (state.side == Side.RIGHT) {
-        Color.parseColor("#C5EFD1")
-    } else {
-        Color.parseColor("#FCFCF8")
-    }
-    private val gradientColors = intArrayOf(lighten(baseColor), baseColor, darken(baseColor))
+    private var state = initialState
+    private var palette = initialPalette
+    private var currentRadii = initialState.cornerRadii
+    private var baseColor = initialPalette.bubbleColor
+    private var gradientColors = intArrayOf(lighten(baseColor), baseColor, darken(baseColor))
     private val gradientStops = floatArrayOf(0f, 0.55f, 1f)
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dp(1f)
-        color = Color.argb(140, 255, 255, 255)
+        strokeWidth = dp(initialPalette.strokeWidthDp)
+        color = initialPalette.strokeColor
     }
     private val path = Path()
     private val rect = RectF()
+    private var animator: ValueAnimator? = null
     private var cachedLeft = Int.MIN_VALUE
     private var cachedTop = Int.MIN_VALUE
     private var cachedRight = Int.MIN_VALUE
     private var cachedBottom = Int.MIN_VALUE
     private var cachedGradient: LinearGradient? = null
+
+    val stableKey: String
+        get() = state.stableKey
+
+    val side: ChatBubbleStylePolicy.Side
+        get() = state.side
+
+    val position: ChatBubbleStylePolicy.GroupPosition
+        get() = state.position
 
     override fun draw(canvas: Canvas) {
         updateDrawingCache()
@@ -45,7 +56,9 @@ class ModernBubbleDrawable(
         fillPaint.style = Paint.Style.FILL
         canvas.drawPath(path, fillPaint)
         fillPaint.shader = null
-        canvas.drawPath(path, strokePaint)
+        if (strokePaint.strokeWidth > 0f && Color.alpha(strokePaint.color) > 0) {
+            canvas.drawPath(path, strokePaint)
+        }
     }
 
     override fun setAlpha(alpha: Int) {
@@ -62,6 +75,35 @@ class ModernBubbleDrawable(
 
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
+    fun update(
+        nextState: ChatBubbleStylePolicy.RenderState,
+        nextPalette: ChatBubbleStylePolicy.BubblePalette,
+        animateCorners: Boolean
+    ) {
+        val startRadii = currentRadii
+        val endRadii = nextState.cornerRadii
+        state = nextState
+        updatePalette(nextPalette)
+        animator?.cancel()
+        if (!animateCorners || startRadii == endRadii) {
+            currentRadii = endRadii
+            invalidateDrawingCache()
+            invalidateSelf()
+            return
+        }
+        animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 180L
+            interpolator = DecelerateInterpolator(1.5f)
+            addUpdateListener { animation ->
+                val fraction = animation.animatedValue as Float
+                currentRadii = lerp(startRadii, endRadii, fraction)
+                invalidateDrawingCache()
+                invalidateSelf()
+            }
+            start()
+        }
+    }
+
     private fun updateDrawingCache() {
         val currentBounds = bounds
         if (cachedLeft == currentBounds.left &&
@@ -77,7 +119,10 @@ class ModernBubbleDrawable(
         cachedBottom = currentBounds.bottom
 
         rect.set(currentBounds)
-        rect.inset(dp(0.5f), dp(0.5f))
+        val inset = strokePaint.strokeWidth / 2f
+        if (inset > 0f && Color.alpha(strokePaint.color) > 0) {
+            rect.inset(inset, inset)
+        }
         path.reset()
         path.addRoundRect(rect, radiiPx(), Path.Direction.CW)
         cachedGradient = LinearGradient(
@@ -92,7 +137,7 @@ class ModernBubbleDrawable(
     }
 
     private fun radiiPx(): FloatArray {
-        val radii = state.cornerRadii
+        val radii = currentRadii
         val topLeft = dp(radii.topLeft)
         val topRight = dp(radii.topRight)
         val bottomRight = dp(radii.bottomRight)
@@ -110,6 +155,43 @@ class ModernBubbleDrawable(
     }
 
     private fun dp(value: Float): Float = value * density
+
+    private fun updatePalette(nextPalette: ChatBubbleStylePolicy.BubblePalette) {
+        if (palette == nextPalette) {
+            return
+        }
+        palette = nextPalette
+        baseColor = nextPalette.bubbleColor
+        gradientColors = intArrayOf(lighten(baseColor), baseColor, darken(baseColor))
+        strokePaint.strokeWidth = dp(nextPalette.strokeWidthDp)
+        strokePaint.color = nextPalette.strokeColor
+        invalidateDrawingCache()
+    }
+
+    private fun invalidateDrawingCache() {
+        cachedLeft = Int.MIN_VALUE
+        cachedTop = Int.MIN_VALUE
+        cachedRight = Int.MIN_VALUE
+        cachedBottom = Int.MIN_VALUE
+        cachedGradient = null
+    }
+
+    private fun lerp(
+        start: ChatBubbleStylePolicy.CornerRadiiDp,
+        end: ChatBubbleStylePolicy.CornerRadiiDp,
+        fraction: Float
+    ): ChatBubbleStylePolicy.CornerRadiiDp {
+        return ChatBubbleStylePolicy.CornerRadiiDp(
+            topLeft = lerp(start.topLeft, end.topLeft, fraction),
+            topRight = lerp(start.topRight, end.topRight, fraction),
+            bottomRight = lerp(start.bottomRight, end.bottomRight, fraction),
+            bottomLeft = lerp(start.bottomLeft, end.bottomLeft, fraction)
+        )
+    }
+
+    private fun lerp(start: Float, end: Float, fraction: Float): Float {
+        return start + (end - start) * fraction
+    }
 
     private fun lighten(color: Int): Int {
         return Color.argb(

@@ -763,6 +763,9 @@ object ListViewHooker : HookerProvider {
             override fun afterHookedMethod(param: MethodHookParam?) {
                 try {
                     val view = param?.result as View
+                    val listView = param?.thisObject as? AbsListView
+                    val adapter = listView?.adapter
+                    val position = param?.args?.getOrNull(0) as? Int ?: -1
                     val context = view.context
                     val tmp = excludeContext.find { context::class.java.name.contains(it) }
                     if (tmp != null) {
@@ -795,10 +798,13 @@ object ListViewHooker : HookerProvider {
                                 XposedHelpers.callMethod(msgView, "setHintTextColor", chatMsgRightTextColor)
 //                    val mText = XposedHelpers.getObjectField(msgView, "mText")
 //                    log("msg right text=$mText")
-                                ModernChatBubbleStyler.applyLegacyTextMessage(
+                                ModernChatBubbleStyler.applyLegacyTextMessageFromAdapter(
+                                        adapter,
+                                        position,
                                         view,
                                         msgView,
-                                        ChatBubbleStylePolicy.Side.RIGHT
+                                        ChatBubbleStylePolicy.Side.RIGHT,
+                                        scheduleAppendRefresh = true
                                 )
                             }
                         }
@@ -831,10 +837,13 @@ object ListViewHooker : HookerProvider {
                                 XposedHelpers.callMethod(msgView, "setTextColor", chatMsgLeftTextColor)
                                 XposedHelpers.callMethod(msgView, "setLinkTextColor", chatMsgLeftTextColor)
                                 XposedHelpers.callMethod(msgView, "setHintTextColor", chatMsgLeftTextColor)
-                                ModernChatBubbleStyler.applyLegacyTextMessage(
+                                ModernChatBubbleStyler.applyLegacyTextMessageFromAdapter(
+                                        adapter,
+                                        position,
                                         view,
                                         msgView,
-                                        ChatBubbleStylePolicy.Side.LEFT
+                                        ChatBubbleStylePolicy.Side.LEFT,
+                                        scheduleAppendRefresh = false
                                 )
                             }
                         }

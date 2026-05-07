@@ -1,28 +1,28 @@
 MDWechat
 ====
 # 简介
-Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前维护分支为 `v4.0`。
+Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前维护分支为 `MD3v1.0`。
 
 - 主要适配微信 `8.0.49`
 - 支持的微信版本范围：`6.7.3 - 8.0.49`
 - 只支持 Android 5.0 及以上
 
 # 近期更新
-1. 适配微信 `8.0.49`。
-2. 修复微信、通讯录、发现、我，以及聊天附件面板里的异常蓝色高亮矩形。
-3. 稳定微信 `8.0.49` 下主界面列表和页面背景显示。
-4. 重做悬浮按钮展开/收回动画，让图标与文字标签同步，并修正标签阴影与文字居中效果。
+1. 发布 `MD3v1.0`，主要围绕微信 `8.0.49` 调整 Material 3 风格。
+2. 重做主界面底部 Tab、悬浮按钮、会话列表、通讯录、发现、我等页面视觉细节。
+3. 重构聊天气泡渲染，支持连续消息智能分组、圆角联动、阴影层次、头像/昵称对齐、引用消息和自定义颜色。
+4. 改善进入会话和滚动时的表现，减少原始气泡闪现、分组错乱和明显卡顿。
 5. 构建环境升级到 `AGP 7.1.2 + Gradle 7.5 + Kotlin 1.6.21`，命令行构建需要 `Java 11+`。
 
 # 效果预览
-[![gif_demo](https://z3.ax1x.com/2021/03/24/6bOQKJ.gif)](https://imgtu.com/i/6bOQKJ)
-![main00](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/main00.png)
-![chat00](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/chat00.png)
-![main01](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/main01.png)
-![main02](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/main02.png)
-![main03](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/main03.png)
-![main05](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/main05.png)
-![chat01](https://gitee.com/JoshCai/MDWechat/raw/v4.0/image/chat01.png)
+![gif_demo](image/demo.gif)
+![main00](image/main00.png)
+![chat00](image/chat00.png)
+![main01](image/main01.png)
+![main02](image/main02.png)
+![main03](image/main03.png)
+![main05](image/main05.png)
+![chat01](image/chat01.png)
 
 # 功能
 实现的功能有:
@@ -40,7 +40,7 @@ Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前维�
 12. 主界面列表去掉分割线,增加 Ripple 效果(按下水波纹),支持修改颜色
 13. ~~主界面支持隐藏 发现/设置 页面~~(2.0未加入)
 14. ~~支持聊天列表置顶底色修改~~(2.0未加入)
-15. 聊天气泡修改,支持.9图,支持修改着色,支持修改文本颜色(气泡修改在8.0.24之后失效)
+15. 聊天气泡修改，支持 MD3 风格智能分组、连续消息圆角联动、阴影层次、头像/昵称对齐、引用消息适配，并保留自定义颜色和文本颜色。
 16. ~~发现页面支持隐藏朋友圈/扫一扫/摇一摇/附近的人/游戏/购物/小程序~~(微信自带,2.0已去掉)
 17. ~~移除会话列表下拉小程序,最低支持微信 6.6.2~~(微信7.0.0以上失效)
 18. 识别微X模块入口,移动到悬浮按钮(2.0新增)
@@ -59,13 +59,10 @@ Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前维�
 4. `installDebug` 在安装完成后会自动重启目标微信进程。
 
 # 存在的问题
-1. 导致微信变卡,这是无法避免的.
-2. 悬浮按钮在某些机型(魅族/中兴)上显示异常,在聊天页面会显示.
-3. 4.0版本对于一些高分辨率的机型可能存在闪退的情况.
-4. 微信7.0.5之后进入首页可能产生黑色遮罩, 一般来说下滑即可消除.
-5. 点击最近聊天进入聊天页面后,返回主界面时有几率产生白条, 这时把白条移除屏幕外(比如下拉到小程序界面等)即可消除白条.
-6. 沉浸背景时朋友圈顶栏图片显示错位.
-7. 微信8.0.27之后的聊天气泡更改失效.
+1. 当前主要围绕微信 `8.0.49` 国内版实测，其他版本或 Play 版可能需要重新适配配置。
+2. 聊天气泡依赖微信消息列表和消息行结构，微信更新后可能需要调整分组和引用消息识别。
+3. 悬浮按钮在部分机型或框架组合上仍可能出现位置或显示异常。
+4. 沉浸背景时，朋友圈顶栏图片在部分分辨率上可能显示错位。
 
 # 感谢
 1. [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)

@@ -13,7 +13,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.blanke.mdwechat.util.ChatBubbleStylePolicy
 import com.blanke.mdwechat.util.RuntimeProbe
-import com.blanke.mdwechat.util.ChatBubbleStylePolicy.Side
 import de.robv.android.xposed.XposedHelpers
 import java.util.Collections
 import java.util.WeakHashMap
@@ -30,12 +29,10 @@ object ModernChatBubbleRenderer {
     private const val keyOriginalAvatarHeight = "mdwechat_native_bubble_avatar_height"
     private const val keyAppliedSignature = "mdwechat_native_bubble_applied_signature"
     private const val keyBoundaryRefreshSignature = "mdwechat_native_bubble_boundary_refresh_signature"
+    private const val keyPendingAppendRefresh = "mdwechat_native_bubble_pending_append_refresh"
     private const val probeFile = "native_bubble_renderer.txt"
     private const val enableRendererProbe = false
-    private val rightTextColor = Color.parseColor("#042100")
-    private val leftTextColor = Color.parseColor("#1A1C19")
-    private val rightQuoteTextColor = Color.parseColor("#31583D")
-    private val leftQuoteTextColor = Color.parseColor("#666B63")
+    private val appendRefreshDelaysMs = longArrayOf(80L, 220L, 520L, 900L)
     private val probeKeys = mutableSetOf<String>()
     private val timeTextPattern = Regex("^\\d{1,2}:\\d{2}$")
     private val resourceIdCache = Collections.synchronizedMap(WeakHashMap<Context, MutableMap<String, Int>>())
@@ -44,22 +41,58 @@ object ModernChatBubbleRenderer {
         val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(adapter, position)
         if (state == null) {
             probe(itemView, "adapter.noState:${adapter.javaClass.name}:$position")
+            debug(itemView, "adapterBind noState adapter=${adapter.javaClass.name} pos=$position")
             return false
         }
+        debug(
+            itemView,
+            "adapterBind state adapter=${adapter.javaClass.name} pos=$position " +
+                    "key=${state.stableKey.takeLast(10)} side=${state.side} group=${state.position}"
+        )
+        ModernChatBubbleStyler.rememberBoundRenderState(adapter, position, itemView, state)
         val applied = applyState(itemView, state, "adapter:${adapter.javaClass.simpleName}:$position")
         if (applied) {
             refreshPreviousItemAcrossTimeSeparator(adapter, position, itemView)
+            refreshVisibleNeighborItemsIfNeeded(adapter, position, findItemRoot(itemView) ?: itemView, state)
+        }
+        return applied
+    }
+
+    fun applyVisibleChildrenFromAdapter(recycler: ViewGroup, adapter: Any): Int {
+        val states = ModernChatBubbleStyler.resolveVisibleRenderStatesFromAdapter(recycler, adapter)
+        debug(
+            recycler,
+            "visibleStates adapter=${adapter.javaClass.name} count=${states.size} children=${recycler.childCount}"
+        )
+        var applied = 0
+        for (entry in states) {
+            if (applyState(entry.itemView, entry.state, "visible:${adapter.javaClass.simpleName}")) {
+                applied++
+            }
+        }
+        return applied
+    }
+
+    fun applyFromChattingItemBind(boundView: View, holder: Any?, msgInfo: Any): Boolean {
+        val context = ModernChatBubbleStyler.resolveRenderContextFromChattingItemBind(
+            boundView = boundView,
+            holder = holder,
+            msgInfo = msgInfo
+        )
+        if (context == null) {
+            probe(boundView, "chatItem.noState:${msgInfo.javaClass.name}")
+            return false
+        }
+        val applied = applyState(boundView, context.state, "chatItem:${msgInfo.javaClass.simpleName}")
+        if (applied && context.adapter != null && context.position >= 0) {
+            val itemView = findItemRoot(boundView) ?: boundView
+            refreshVisibleNeighborItemsIfNeeded(context.adapter, context.position, itemView, context.state)
         }
         return applied
     }
 
     fun applyFromChattingItemBind(boundView: View, msgInfo: Any): Boolean {
-        val state = ModernChatBubbleStyler.resolveRenderStateFromMessage(msgInfo)
-        if (state == null) {
-            probe(boundView, "chatItem.noState:${msgInfo.javaClass.name}")
-            return false
-        }
-        return applyState(boundView, state, "chatItem:${msgInfo.javaClass.simpleName}")
+        return applyFromChattingItemBind(boundView, null, msgInfo)
     }
 
     private fun applyState(boundView: View, state: ChatBubbleStylePolicy.RenderState, source: String): Boolean {
@@ -67,38 +100,160 @@ object ModernChatBubbleRenderer {
         val messageView = findViewByResourceName(itemView, resourceMessage)
         if (messageView == null) {
             probe(boundView, "$source.noBkl:${boundView.javaClass.name}:${resourceName(boundView)}")
+            debug(boundView, "$source noMessageView item=${resourceName(itemView)}")
             return false
         }
         val text = renderedText(messageView)
         if (text.isNullOrBlank()) {
             probe(messageView, "$source.noText:${messageView.javaClass.name}:${resourceName(messageView)}")
+            debug(itemView, "$source noText msg=${resourceName(messageView)}")
             return false
         }
         val renderState = applyVisibleBoundaries(itemView, state)
-        val signature = renderSignature(renderState, text)
+        val palette = ModernChatBubbleColors.palette(renderState.side)
+        val signature = renderSignature(renderState, text, palette)
         if (isCurrentRender(itemView, messageView, renderState, signature)) {
             syncReusableState(itemView, messageView, renderState)
+            debugApply(itemView, messageView, renderState, source, text, "current")
             scheduleBoundaryRefresh(itemView, state, renderState, source)
             return true
         }
         clearOriginalBubbleContainers(messageView)
-        messageView.background = ModernBubbleDrawable(messageView.context, renderState)
+        val existingBubble = messageView.background as? ModernBubbleDrawable
+        val canUpdateExisting = existingBubble != null &&
+                existingBubble.stableKey == renderState.stableKey &&
+                existingBubble.side == renderState.side
+        if (canUpdateExisting) {
+            debug(
+                itemView,
+                "$source updateBubble key=${renderState.stableKey.takeLast(10)} " +
+                        "old=${existingBubble?.position} new=${renderState.position} " +
+                        "animate=${existingBubble?.position != renderState.position}"
+            )
+            existingBubble?.update(
+                nextState = renderState,
+                nextPalette = palette,
+                animateCorners = existingBubble.position != renderState.position
+            )
+        } else {
+            debug(
+                itemView,
+                "$source newBubble key=${renderState.stableKey.takeLast(10)} side=${renderState.side} " +
+                        "group=${renderState.position}"
+            )
+            messageView.background = ModernBubbleDrawable(messageView.context, renderState, palette)
+        }
         messageView.setPadding(dp(messageView, 13f), dp(messageView, 8.5f), dp(messageView, 13f), dp(messageView, 8.5f))
-        setTextColor(messageView, if (renderState.side == Side.RIGHT) rightTextColor else leftTextColor)
+        setTextColor(messageView, palette.textColor)
         applyShadow(messageView, renderState)
         disableAncestorClipping(messageView)
 
         val marginTarget = messageView.parent as? View ?: messageView
         setTopMargin(marginTarget, dp(messageView, renderState.topMarginDp))
         normalizeMessageColumn(itemView, messageView, renderState)
-        styleQuoteBlock(itemView, messageView, renderState)
+        styleQuoteBlock(itemView, messageView, renderState, palette)
         setAvatarVisibility(findViewByResourceName(itemView, resourceAvatar), renderState.showAvatar)
         setNicknameVisibility(findNicknameView(itemView), renderState.showNickname)
         normalizeRow(itemView, messageView, renderState)
         XposedHelpers.setAdditionalInstanceField(itemView, keyAppliedSignature, signature)
         probe(messageView, "$source.applied:${renderState.side}:${renderState.position}:${text.take(16)}")
+        debugApply(itemView, messageView, renderState, source, text, "applied")
         scheduleBoundaryRefresh(itemView, state, renderState, source)
         return true
+    }
+
+    private fun refreshVisibleNeighborItemsIfNeeded(
+        adapter: Any,
+        position: Int,
+        itemView: View,
+        state: ChatBubbleStylePolicy.RenderState
+    ) {
+        if (state.side != ChatBubbleStylePolicy.Side.RIGHT ||
+            state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE
+        ) {
+            return
+        }
+        refreshVisibleNeighborItem(
+            adapter = adapter,
+            position = position - 1,
+            itemView = adjacentVisibleItem(itemView, step = -1, requireMessage = true),
+            source = "prev"
+        )
+        refreshVisibleNeighborItem(
+            adapter = adapter,
+            position = position + 1,
+            itemView = adjacentVisibleItem(itemView, step = 1, requireMessage = true),
+            source = "next"
+        )
+    }
+
+    private fun refreshVisibleNeighborItem(
+        adapter: Any,
+        position: Int,
+        itemView: View?,
+        source: String
+    ) {
+        if (position < 0 || itemView == null) {
+            return
+        }
+        val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(adapter, position) ?: return
+        applyState(itemView, state, "adapter-$source:${adapter.javaClass.simpleName}:$position")
+    }
+
+    private fun scheduleRightAppendRefresh(
+        boundView: View,
+        holder: Any?,
+        msgInfo: Any,
+        initialContext: ModernChatBubbleStyler.RenderContext
+    ) {
+        if (initialContext.adapter != null &&
+            initialContext.position >= 0 &&
+            initialContext.state.position != ChatBubbleStylePolicy.GroupPosition.SINGLE
+        ) {
+            return
+        }
+        val itemView = findItemRoot(boundView) ?: boundView
+        if (XposedHelpers.getAdditionalInstanceField(itemView, keyPendingAppendRefresh) == true) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(itemView, keyPendingAppendRefresh, true)
+        scheduleRightAppendRefreshAttempt(itemView, holder, msgInfo, attempt = 0)
+    }
+
+    private fun scheduleRightAppendRefreshAttempt(
+        itemView: View,
+        holder: Any?,
+        msgInfo: Any,
+        attempt: Int
+    ) {
+        val delay = appendRefreshDelaysMs.getOrNull(attempt)
+        if (delay == null) {
+            XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingAppendRefresh)
+            return
+        }
+        itemView.postDelayed({
+            val root = findItemRoot(itemView) ?: itemView
+            val context = ModernChatBubbleStyler.resolveRenderContextFromChattingItemBind(root, holder, msgInfo)
+            val shouldRetry = if (context != null && context.state.side == ChatBubbleStylePolicy.Side.RIGHT) {
+                val applied = applyState(root, context.state, "chatItem-delayed:${attempt + 1}")
+                if (applied && context.adapter != null && context.position >= 0) {
+                    refreshVisibleNeighborItemsIfNeeded(context.adapter, context.position, root, context.state)
+                }
+                context.adapter == null ||
+                        context.position < 0 ||
+                        context.state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE
+            } else {
+                true
+            }
+            if (shouldRetry && attempt + 1 < appendRefreshDelaysMs.size) {
+                scheduleRightAppendRefreshAttempt(root, holder, msgInfo, attempt + 1)
+            } else {
+                XposedHelpers.removeAdditionalInstanceField(root, keyPendingAppendRefresh)
+                if (root !== itemView) {
+                    XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingAppendRefresh)
+                }
+            }
+        }, delay)
     }
 
     private fun applyVisibleBoundaries(
@@ -202,7 +357,8 @@ object ModernChatBubbleRenderer {
     private fun styleQuoteBlock(
         itemView: View,
         messageView: View,
-        state: ChatBubbleStylePolicy.RenderState
+        state: ChatBubbleStylePolicy.RenderState,
+        palette: ChatBubbleStylePolicy.BubblePalette
     ) {
         val quoteText = findViewByResourceName(itemView, resourceQuoteText) ?: return
         val quote = renderedText(quoteText)
@@ -219,12 +375,9 @@ object ModernChatBubbleRenderer {
             background = null
         }
 
-        quoteContainer.background = createQuoteDrawable(quoteContainer, state)
+        quoteContainer.background = createQuoteDrawable(quoteContainer, palette)
         quoteContainer.minimumHeight = 0
-        setTextColor(
-            quoteText,
-            if (state.side == Side.RIGHT) rightQuoteTextColor else leftQuoteTextColor
-        )
+        setTextColor(quoteText, palette.quoteTextColor)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             quoteContainer.elevation = dp(quoteContainer, 1f).toFloat()
             quoteContainer.translationZ = 0f
@@ -241,21 +394,16 @@ object ModernChatBubbleRenderer {
         return value != "{source}" && value != "{title}" && value != "{content}"
     }
 
-    private fun createQuoteDrawable(view: View, state: ChatBubbleStylePolicy.RenderState): GradientDrawable {
-        val fill = if (state.side == Side.RIGHT) {
-            Color.parseColor("#D8F1DE")
-        } else {
-            Color.parseColor("#ECEEE8")
-        }
-        val stroke = if (state.side == Side.RIGHT) {
-            Color.argb(110, 255, 255, 255)
-        } else {
-            Color.argb(120, 255, 255, 255)
-        }
+    private fun createQuoteDrawable(
+        view: View,
+        palette: ChatBubbleStylePolicy.BubblePalette
+    ): GradientDrawable {
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(fill)
-            setStroke(dp(view, 0.75f), stroke)
+            setColor(palette.quoteFillColor)
+            if (Color.alpha(palette.quoteStrokeColor) > 0) {
+                setStroke(dp(view, 0.75f), palette.quoteStrokeColor)
+            }
             cornerRadius = dp(view, 5.5f).toFloat()
         }
     }
@@ -403,6 +551,53 @@ object ModernChatBubbleRenderer {
         }
         probeKeys.add(message)
         RuntimeProbe.append(view.context, probeFile, "ModernNativeBubble $message")
+    }
+
+    private fun debug(view: View, message: String) {
+        ModernChatBubbleStyler.debugBubbleProbe(view.context, "renderer $message")
+    }
+
+    private fun debugApply(
+        itemView: View,
+        messageView: View,
+        state: ChatBubbleStylePolicy.RenderState,
+        source: String,
+        text: String,
+        branch: String
+    ) {
+        val avatarView = findViewByResourceName(itemView, resourceAvatar)
+        val avatarContainer = avatarView?.parent as? View
+        val nicknameView = findNicknameView(itemView)
+        debug(
+            itemView,
+            "$source $branch key=${state.stableKey.takeLast(10)} side=${state.side} group=${state.position} " +
+                    "wantAvatar=${state.showAvatar} avatar=${visibilityName(avatarView)} " +
+                    "avatarContainer=${visibilityName(avatarContainer)} avatarH=${avatarContainer?.height}/${avatarView?.height} " +
+                    "wantNick=${state.showNickname} nick=${visibilityName(nicknameView)} " +
+                    "item=${boundsText(itemView)} msg=${boundsText(messageView)} text=${shortText(text)}"
+        )
+    }
+
+    private fun visibilityName(view: View?): String {
+        return when (view?.visibility) {
+            View.VISIBLE -> "VISIBLE"
+            View.INVISIBLE -> "INVISIBLE"
+            View.GONE -> "GONE"
+            null -> "null"
+            else -> view.visibility.toString()
+        }
+    }
+
+    private fun boundsText(view: View?): String {
+        view ?: return "null"
+        return "${view.left},${view.top},${view.right},${view.bottom}:${view.width}x${view.height}"
+    }
+
+    private fun shortText(text: String): String {
+        return text
+            .replace('\n', ' ')
+            .replace('\r', ' ')
+            .take(24)
     }
 
     private fun forceTopGravity(view: View?) {
@@ -596,9 +791,10 @@ object ModernChatBubbleRenderer {
 
     private fun renderSignature(
         state: ChatBubbleStylePolicy.RenderState,
-        text: String
+        text: String,
+        palette: ChatBubbleStylePolicy.BubblePalette
     ): String {
-        return "${state.stableKey}:${state.side}:${state.position}:${text.hashCode()}"
+        return "${state.stableKey}:${state.side}:${state.position}:${text.hashCode()}:${palette.signature}"
     }
 
     private fun isCurrentRender(

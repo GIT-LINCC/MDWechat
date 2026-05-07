@@ -5,7 +5,6 @@ import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.StateListDrawable
 import android.os.Build
 import android.view.Gravity
 import android.view.View
@@ -49,15 +48,20 @@ object ModernChatBubbleStyler {
     private const val keyOriginalAvatarHeight = "mdwechat_modern_chat_bubble_avatar_original_height"
     private const val keyPendingRowCompact = "mdwechat_modern_chat_bubble_pending_row_compact"
     private const val keyPendingDecision = "mdwechat_modern_chat_bubble_pending_decision"
+    private const val keyPendingLegacyAppendRefresh = "mdwechat_modern_chat_bubble_legacy_append_refresh"
+    private const val keyPendingVisibleClusterRefresh = "mdwechat_modern_chat_bubble_visible_cluster_refresh"
+    private const val keyBoundAdapterClass = "mdwechat_modern_chat_bubble_bound_adapter_class"
+    private const val keyBoundAdapterPosition = "mdwechat_modern_chat_bubble_bound_adapter_position"
+    private const val keyBoundStableKey = "mdwechat_modern_chat_bubble_bound_stable_key"
     private const val timeSeparatorGapMs = 5 * 60 * 1000L
     private const val adapterWindowPadding = 16
+    private const val maxVisibleClusterItems = 8
     private const val bubbleProbeFile = "chat_bubble_probe.txt"
+    private const val debugProbeFile = "chat_bubble_debug.txt"
     private const val enableVerboseBubbleProbe = false
+    private const val enableDebugBubbleProbe = false
+    private val legacyAppendRefreshDelaysMs = longArrayOf(80L, 220L, 520L, 900L)
 
-    private val rightBubbleColor = Color.parseColor("#C5EFD1")
-    private val rightTextColor = Color.parseColor("#042100")
-    private val leftBubbleColor = Color.parseColor("#FCFCF8")
-    private val leftTextColor = Color.parseColor("#1A1C19")
     private val shadowColor = Color.argb(32, 0, 0, 0)
     private val diagnosticLogs = mutableSetOf<String>()
     private val adapterProbeLogs = mutableSetOf<String>()
@@ -65,6 +69,7 @@ object ModernChatBubbleStyler {
     private val chatItemProbeLogs = mutableSetOf<String>()
     private val styleProbeLogs = mutableSetOf<String>()
     private val layoutProbeLogs = mutableSetOf<String>()
+    private val debugProbeLogs = mutableSetOf<String>()
     private val messageViewIdCache = Collections.synchronizedMap(WeakHashMap<Context, Int>())
     private val bubbleDecisionCache = Collections.synchronizedMap(
         object : LinkedHashMap<String, BubbleDecision>(256, 0.75f, true) {
@@ -72,6 +77,17 @@ object ModernChatBubbleStyler {
                 return size > 1600
             }
         }
+    )
+
+    data class RenderContext(
+        val state: ChatBubbleStylePolicy.RenderState,
+        val adapter: Any?,
+        val position: Int
+    )
+
+    data class VisibleRenderState(
+        val itemView: View,
+        val state: ChatBubbleStylePolicy.RenderState
     )
 
     val isEnabled: Boolean
@@ -98,7 +114,7 @@ object ModernChatBubbleStyler {
         val side = XposedHelpers.getAdditionalInstanceField(view, keyLastSide) as? Side ?: return null
         val position = XposedHelpers.getAdditionalInstanceField(view, keyLastPosition) as? GroupPosition
             ?: GroupPosition.SINGLE
-        return createBubbleDrawable(view, side, position)
+        return createBubbleDrawable(view, side, position, visualStableKey(view, null))
     }
 
     fun restoreLastBubbleBackground(view: View) {
@@ -120,7 +136,7 @@ object ModernChatBubbleStyler {
             return null
         }
         val decision = readPendingDecision(view) ?: return null
-        return createBubbleDrawable(view, decision.side, decision.position)
+        return createBubbleDrawable(view, decision.side, decision.position, visualStableKey(view, null))
     }
 
     fun applyPendingBubbleBackground(view: View): Boolean {
@@ -234,7 +250,7 @@ object ModernChatBubbleStyler {
             probeAdapterOnce(itemView, adapter, position)
             return false
         }
-        val visibleItem = VisibleTextItem(position, 0, normalizedItem, info)
+        val visibleItem = VisibleTextItem(position, 0, normalizedItem, info, null)
         val matchedEntry = findBestWindowMatch(window, visibleItem) ?: return false
         val neighbors = createBoundNeighbors(
             window = window,
@@ -249,6 +265,72 @@ object ModernChatBubbleStyler {
         )
         probeAdapterOnce(itemView, adapter, position, neighbors.sourceLabel)
         return applyItem(normalizedItem, neighbors, info)
+    }
+
+    fun applyFromAdapterBindAndVisibleNeighbors(adapter: Any, position: Int, itemView: View): Boolean {
+        val normalizedItem = findItemRoot(itemView) ?: itemView
+        val applied = applyFromAdapterBind(adapter, position, normalizedItem)
+        if (!applied) {
+            return false
+        }
+        refreshVisibleNeighbor(adapter, position - 1, adjacentVisibleItem(normalizedItem, step = -1))
+        refreshVisibleNeighbor(adapter, position + 1, adjacentVisibleItem(normalizedItem, step = 1))
+        return true
+    }
+
+    private fun refreshVisibleNeighbor(adapter: Any, position: Int, itemView: View?) {
+        if (position < 0 || itemView == null) {
+            return
+        }
+        applyFromAdapterBind(adapter, position, itemView)
+    }
+
+    private fun adjacentVisibleItem(itemView: View, step: Int): View? {
+        val parent = itemView.parent as? ViewGroup ?: return null
+        val index = parent.indexOfChild(itemView)
+        if (index < 0) {
+            return null
+        }
+        val targetIndex = index + step
+        if (targetIndex !in 0 until parent.childCount) {
+            return null
+        }
+        return parent.getChildAt(targetIndex)
+    }
+
+    private fun scheduleLegacyAppendRefresh(adapter: Any, position: Int, itemView: View) {
+        if (XposedHelpers.getAdditionalInstanceField(itemView, keyPendingLegacyAppendRefresh) == true) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(itemView, keyPendingLegacyAppendRefresh, true)
+        scheduleLegacyAppendRefreshAttempt(adapter, position, itemView, attempt = 0)
+    }
+
+    private fun scheduleLegacyAppendRefreshAttempt(
+        adapter: Any,
+        position: Int,
+        itemView: View,
+        attempt: Int
+    ) {
+        val delay = legacyAppendRefreshDelaysMs.getOrNull(attempt)
+        if (delay == null) {
+            XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingLegacyAppendRefresh)
+            return
+        }
+        itemView.postDelayed({
+            val root = findItemRoot(itemView) ?: itemView
+            val applied = applyFromAdapterBindAndVisibleNeighbors(adapter, position, root)
+            val state = if (applied) resolveRenderStateFromAdapter(adapter, position) else null
+            val shouldRetry = state == null || state.position == GroupPosition.SINGLE
+            if (shouldRetry && attempt + 1 < legacyAppendRefreshDelaysMs.size) {
+                scheduleLegacyAppendRefreshAttempt(adapter, position, root, attempt + 1)
+            } else {
+                XposedHelpers.removeAdditionalInstanceField(root, keyPendingLegacyAppendRefresh)
+                if (root !== itemView) {
+                    XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingLegacyAppendRefresh)
+                }
+            }
+        }, delay)
     }
 
     fun probeBindHit(itemView: View, adapter: Any, holder: Any, position: Int, source: String) {
@@ -288,6 +370,42 @@ object ModernChatBubbleStyler {
 
     fun shouldWriteVerboseProbe(): Boolean = enableVerboseBubbleProbe
 
+    fun debugBubbleProbe(context: Context?, message: String) {
+        if (!enableDebugBubbleProbe) {
+            return
+        }
+        val key = message.take(260)
+        if (debugProbeLogs.size >= 420 || debugProbeLogs.contains(key)) {
+            return
+        }
+        debugProbeLogs.add(key)
+        RuntimeProbe.append(context, debugProbeFile, "ModernChatBubbleDebug $message")
+    }
+
+    fun rememberBoundRenderState(
+        adapter: Any,
+        position: Int,
+        itemView: View,
+        state: ChatBubbleStylePolicy.RenderState
+    ) {
+        val normalizedItem = findItemRoot(itemView) ?: itemView
+        rememberBoundRenderStateOnView(adapter, position, state.stableKey, normalizedItem)
+        findViewByResourceName(normalizedItem, resourceMessage)?.let { messageView ->
+            rememberBoundRenderStateOnView(adapter, position, state.stableKey, messageView)
+        }
+    }
+
+    private fun rememberBoundRenderStateOnView(
+        adapter: Any,
+        position: Int,
+        stableKey: String,
+        view: View
+    ) {
+        XposedHelpers.setAdditionalInstanceField(view, keyBoundAdapterClass, adapter.javaClass.name)
+        XposedHelpers.setAdditionalInstanceField(view, keyBoundAdapterPosition, position)
+        XposedHelpers.setAdditionalInstanceField(view, keyBoundStableKey, stableKey)
+    }
+
     fun extractRenderedText(view: View?): String? {
         return extractText(view)
     }
@@ -307,6 +425,35 @@ object ModernChatBubbleStyler {
         return ChatBubbleStylePolicy.resolveRenderStates(rows)[current.stableKey]
     }
 
+    fun resolveVisibleRenderStatesFromAdapter(
+        recycler: ViewGroup,
+        adapter: Any
+    ): List<VisibleRenderState> {
+        if (!isEnabled) {
+            return emptyList()
+        }
+        val visibleItems = collectVisibleTextItems(recycler)
+        if (visibleItems.isEmpty()) {
+            return emptyList()
+        }
+        val window = readWindowForVisibleResolution(adapter, visibleItems) ?: return emptyList()
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            window.entries.map { it.meta.toMessageRow() }
+        )
+        val matchedItems = matchVisibleItems(window, visibleItems)
+        debugVisibleResolution(recycler, adapter, window, visibleItems, matchedItems, states)
+        return matchedItems.mapNotNull { (visibleItem, matchedEntry) ->
+            rememberWindowEntry(adapter, visibleItem, matchedEntry)
+            states[matchedEntry.meta.stableKey]?.let { state ->
+                VisibleRenderState(visibleItem.itemView, state)
+            }
+        }
+    }
+
+    fun invalidateAdapterData(adapter: Any) {
+        AdapterMessageReader.invalidate(adapter)
+    }
+
     fun resolveRenderStateFromMessage(msgInfo: Any): ChatBubbleStylePolicy.RenderState? {
         if (!isEnabled) {
             return null
@@ -322,6 +469,33 @@ object ModernChatBubbleStyler {
             topMarginDp = ChatBubbleStylePolicy.topMarginDp(GroupPosition.SINGLE),
             cornerRadii = ChatBubbleStylePolicy.cornerRadii(side, GroupPosition.SINGLE)
         )
+    }
+
+    fun resolveRenderContextFromChattingItemBind(
+        boundView: View,
+        holder: Any?,
+        msgInfo: Any
+    ): RenderContext? {
+        if (!isEnabled) {
+            return null
+        }
+        val itemView = findItemRoot(boundView) ?: boundView
+        val recyclerChild = findRecyclerChild(itemView)
+        val recycler = recyclerChild?.parent as? ViewGroup
+        val adapter = recycler?.let { getRecyclerAdapter(it) }
+        val position = if (recycler != null && recyclerChild != null) {
+            val recyclerPosition = getChildAdapterPosition(recycler, recyclerChild)
+            if (recyclerPosition >= 0) recyclerPosition else readAdapterPositionFromHolder(holder)
+        } else {
+            readAdapterPositionFromHolder(holder)
+        }
+        if (adapter != null && position >= 0) {
+            resolveRenderStateFromAdapter(adapter, position)?.let {
+                return RenderContext(it, adapter, position)
+            }
+        }
+        val state = resolveRenderStateFromMessage(msgInfo) ?: return null
+        return RenderContext(state, null, -1)
     }
 
     fun applyFromChattingItemBind(boundView: View, holder: Any?, msgInfo: Any): Boolean {
@@ -454,23 +628,7 @@ object ModernChatBubbleStyler {
                 return 0
             }
         }
-        val positionedItems = visibleItems.filter { it.requestPosition >= 0 }
-        val window = if (positionedItems.isNotEmpty()) {
-            val minPosition = positionedItems.minOf { it.requestPosition }
-            val maxPosition = positionedItems.maxOf { it.requestPosition }
-            AdapterMessageReader.readWindow(
-                adapter = adapter,
-                startPosition = minPosition - adapterWindowPadding,
-                endPosition = maxPosition + adapterWindowPadding,
-                anchorPosition = minPosition
-            )
-        } else {
-            AdapterMessageReader.readWindowForVisibleItems(
-                adapter = adapter,
-                visibleItems = visibleItems,
-                padding = adapterWindowPadding
-            )
-        }
+        val window = readWindowForVisibleResolution(adapter, visibleItems)
         if (window == null) {
             logDiagnosticOnce(
                 "ModernChatBubbleStyler.noVisibleWindow.${adapter.javaClass.name}",
@@ -480,6 +638,7 @@ object ModernChatBubbleStyler {
         }
 
         val matchedItems = matchVisibleItems(window, visibleItems)
+        debugVisibleResolution(recycler, adapter, window, visibleItems, matchedItems, states = null)
         val visibleByMatchedPosition = matchedItems.associate { (visibleItem, matchedEntry) ->
             matchedEntry.position to visibleItem
         }
@@ -488,6 +647,7 @@ object ModernChatBubbleStyler {
         val topVisibleIndex = matchedItems.minOfOrNull { it.first.visibleIndex } ?: Int.MAX_VALUE
         var applied = 0
         for ((visibleItem, matchedEntry) in matchedItems) {
+            rememberWindowEntry(adapter, visibleItem, matchedEntry)
             val hasTimeBeforeNext = visibleByMatchedPosition[matchedEntry.position + 1]
                 ?.info
                 ?.hasTimeSeparator == true
@@ -511,25 +671,93 @@ object ModernChatBubbleStyler {
         return applied
     }
 
+    private fun readWindowForVisibleResolution(
+        adapter: Any,
+        visibleItems: List<VisibleTextItem>
+    ): MessageWindow? {
+        val positionedItems = visibleItems.filter { it.requestPosition >= 0 }
+        val boundStableKeys = visibleItems
+            .mapNotNull { it.boundStableKey?.takeIf { key -> key.isNotBlank() } }
+            .distinct()
+        val positionWindow = if (positionedItems.isNotEmpty()) {
+            val minPosition = positionedItems.minOf { it.requestPosition }
+            val maxPosition = positionedItems.maxOf { it.requestPosition }
+            AdapterMessageReader.readWindow(
+                adapter = adapter,
+                startPosition = minPosition - adapterWindowPadding,
+                endPosition = maxPosition + adapterWindowPadding,
+                anchorPosition = minPosition
+            )
+        } else {
+            null
+        }
+        if (positionWindow != null && boundStableKeys.all { positionWindow.byStableKey.containsKey(it) }) {
+            return positionWindow
+        }
+        if (boundStableKeys.isNotEmpty()) {
+            AdapterMessageReader.readWindowForBoundStableKeys(
+                adapter = adapter,
+                stableKeys = boundStableKeys,
+                padding = adapterWindowPadding
+            )?.let { return it }
+        }
+        return positionWindow ?: AdapterMessageReader.readWindowForVisibleItems(
+            adapter = adapter,
+            visibleItems = visibleItems,
+            padding = adapterWindowPadding
+        )
+    }
+
+    private fun rememberWindowEntry(adapter: Any, visibleItem: VisibleTextItem, entry: WindowEntry) {
+        rememberBoundRenderStateOnView(adapter, entry.position, entry.meta.stableKey, visibleItem.itemView)
+        rememberBoundRenderStateOnView(adapter, entry.position, entry.meta.stableKey, visibleItem.info.messageView)
+    }
+
     private fun collectVisibleTextItems(recycler: ViewGroup): List<VisibleTextItem> {
         val result = mutableListOf<VisibleTextItem>()
+        val adapter = getRecyclerAdapter(recycler)
         for (index in 0 until recycler.childCount) {
             val child = recycler.getChildAt(index)
-            val position = getChildAdapterPosition(recycler, child)
             val itemView = findItemRoot(child) ?: continue
+            val bound = readRememberedBoundState(itemView, adapter)
+            val position = getChildAdapterPosition(recycler, child).takeIf { it >= 0 }
+                ?: bound?.position
+                ?: -1
             val info = readDirectTextItemInfo(itemView) ?: continue
-            result += VisibleTextItem(position, index, itemView, info)
+            result += VisibleTextItem(position, index, itemView, info, bound?.stableKey)
         }
         return result
+    }
+
+    private fun readRememberedBoundState(itemView: View, adapter: Any?): RememberedBoundState? {
+        val views = buildList {
+            add(itemView)
+            findViewByResourceName(itemView, resourceMessage)?.let { add(it) }
+        }
+        for (view in views) {
+            val adapterClass = XposedHelpers.getAdditionalInstanceField(view, keyBoundAdapterClass) as? String
+            if (adapter != null && adapterClass != adapter.javaClass.name) {
+                continue
+            }
+            val position = XposedHelpers.getAdditionalInstanceField(view, keyBoundAdapterPosition) as? Int
+            val stableKey = XposedHelpers.getAdditionalInstanceField(view, keyBoundStableKey) as? String
+            if (position != null && position >= 0 && !stableKey.isNullOrBlank()) {
+                return RememberedBoundState(position, stableKey)
+            }
+        }
+        return null
     }
 
     private fun matchVisibleItems(
         window: MessageWindow,
         visibleItems: List<VisibleTextItem>
     ): List<Pair<VisibleTextItem, WindowEntry>> {
-        val sortedItems = visibleItems.sortedBy {
-            if (it.requestPosition >= 0) it.requestPosition else it.visibleIndex
-        }
+        val hasBoundStableKeys = visibleItems.any { !it.boundStableKey.isNullOrBlank() }
+        val sortedItems = visibleItems.sortedWith(
+            compareBy<VisibleTextItem> {
+                if (!hasBoundStableKeys && it.requestPosition >= 0) it.requestPosition else it.visibleIndex
+            }.thenBy { it.visibleIndex }
+        )
         if (sortedItems.isEmpty()) {
             return emptyList()
         }
@@ -545,6 +773,49 @@ object ModernChatBubbleStyler {
             usedPositions += matchedEntry.position
             visibleItem to matchedEntry
         }
+    }
+
+    private fun debugVisibleResolution(
+        recycler: ViewGroup,
+        adapter: Any,
+        window: MessageWindow,
+        visibleItems: List<VisibleTextItem>,
+        matchedItems: List<Pair<VisibleTextItem, WindowEntry>>,
+        states: Map<String, ChatBubbleStylePolicy.RenderState>?
+    ) {
+        if (!enableDebugBubbleProbe) {
+            return
+        }
+        val visibleSummary = visibleItems.take(12).joinToString("|") { item ->
+            "#${item.visibleIndex}:req=${item.requestPosition}:txt=${debugText(item.info.visibleText)}:" +
+                    "side=${item.info.side}:time=${item.info.hasTimeSeparator}:h=${item.itemView.height}:" +
+                    "bound=${item.boundStableKey?.takeLast(10)}"
+        }
+        val matchedSummary = matchedItems.take(12).joinToString("|") { (visible, entry) ->
+            val state = states?.get(entry.meta.stableKey)
+            "#${visible.visibleIndex}:req=${visible.requestPosition}->${entry.position}:" +
+                    "state=${state?.position}:meta=${debugMeta(entry.meta)}"
+        }
+        debugBubbleProbe(
+            recycler.context,
+            "visibleResolve adapter=${adapter.javaClass.name} source=${window.sourceLabel} " +
+                    "children=${recycler.childCount} visible=${visibleItems.size} matched=${matchedItems.size} " +
+                    "visibleItems=$visibleSummary matches=$matchedSummary"
+        )
+    }
+
+    private fun debugMeta(meta: RowMeta?): String {
+        meta ?: return "null"
+        return "${meta.side}:${meta.isTextMessage}:${meta.createTimeMs}:${debugText(meta.contentText)}:" +
+                meta.stableKey.takeLast(10)
+    }
+
+    private fun debugText(text: String?): String {
+        return text
+            ?.replace('\n', ' ')
+            ?.replace('\r', ' ')
+            ?.take(24)
+            ?: ""
     }
 
     private fun matchVisibleItemsBySequence(
@@ -710,6 +981,24 @@ object ModernChatBubbleStyler {
         if (visibleText.isBlank()) {
             return null
         }
+        visibleItem.boundStableKey?.let { stableKey ->
+            val entry = window.byStableKey[stableKey]
+            if (entry != null &&
+                entry.position !in excludedPositions &&
+                entry.meta.isTextMessage &&
+                matchesVisibleText(entry.meta, visibleText)
+            ) {
+                return entry
+            }
+            return null
+        }
+        if (visibleItem.requestPosition >= 0 && visibleItem.requestPosition !in excludedPositions) {
+            window.byPosition[visibleItem.requestPosition]?.let { entry ->
+                if (entry.meta.isTextMessage && matchesVisibleText(entry.meta, visibleText)) {
+                    return entry
+                }
+            }
+        }
         return window.entries
             .asSequence()
             .filter { entry -> entry.position !in excludedPositions }
@@ -824,10 +1113,119 @@ object ModernChatBubbleStyler {
             msgView = msgView,
             side = side,
             position = GroupPosition.SINGLE,
+            stableKey = visualStableKey(msgView, itemView),
             itemView = itemView,
             marginTarget = msgView.parent as? View ?: itemView,
             avatarView = null,
             nicknameView = null
+        )
+        if (side == Side.RIGHT) {
+            scheduleVisibleClusterRefresh(itemView)
+        }
+    }
+
+    fun applyLegacyTextMessageFromAdapter(
+        adapter: Any?,
+        position: Int,
+        itemView: View,
+        msgView: View,
+        side: Side,
+        scheduleAppendRefresh: Boolean
+    ) {
+        if (!isEnabled) {
+            return
+        }
+        val appliedFromAdapter = adapter != null &&
+                position >= 0 &&
+                applyFromAdapterBindAndVisibleNeighbors(adapter, position, itemView)
+        if (!appliedFromAdapter) {
+            applyLegacyTextMessage(itemView, msgView, side)
+        }
+        if (scheduleAppendRefresh && adapter != null && position >= 0 && side == Side.RIGHT) {
+            scheduleLegacyAppendRefresh(adapter, position, itemView)
+        }
+        if (side == Side.RIGHT) {
+            scheduleVisibleClusterRefresh(itemView)
+        }
+    }
+
+    fun scheduleVisibleClusterRefresh(itemView: View) {
+        val root = findItemRoot(itemView) ?: itemView
+        if (XposedHelpers.getAdditionalInstanceField(root, keyPendingVisibleClusterRefresh) == true) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(root, keyPendingVisibleClusterRefresh, true)
+        root.post {
+            XposedHelpers.removeAdditionalInstanceField(root, keyPendingVisibleClusterRefresh)
+            applyVisibleClusterAround(root)
+        }
+    }
+
+    private fun applyVisibleClusterAround(itemView: View): Boolean {
+        val anchorRoot = findItemRoot(itemView) ?: itemView
+        val parent = anchorRoot.parent as? ViewGroup ?: return false
+        val anchorIndex = parent.indexOfChild(anchorRoot)
+        if (anchorIndex < 0) {
+            return false
+        }
+        val anchor = visibleClusterItem(anchorRoot) ?: return false
+        val items = mutableListOf(anchor)
+
+        var cursor = anchorIndex - 1
+        while (cursor >= 0 && items.size < maxVisibleClusterItems) {
+            if (items.first().info.hasTimeSeparator) {
+                break
+            }
+            val candidate = visibleClusterItem(parent.getChildAt(cursor)) ?: break
+            if (!canGroupVisible(candidate.info, items.first().info)) {
+                break
+            }
+            items.add(0, candidate)
+            cursor--
+        }
+
+        cursor = anchorIndex + 1
+        while (cursor < parent.childCount && items.size < maxVisibleClusterItems) {
+            val candidate = visibleClusterItem(parent.getChildAt(cursor)) ?: break
+            if (candidate.info.hasTimeSeparator || !canGroupVisible(items.last().info, candidate.info)) {
+                break
+            }
+            items.add(candidate)
+            cursor++
+        }
+
+        if (items.size <= 1) {
+            return false
+        }
+        items.forEachIndexed { index, item ->
+            val position = ChatBubbleStylePolicy.groupPosition(
+                hasPrevious = index > 0,
+                hasNext = index < items.lastIndex
+            )
+            applyMessageVisuals(
+                msgView = item.info.messageView,
+                side = item.info.side,
+                position = position,
+                stableKey = visualStableKey(item.info.messageView, item.info.itemView),
+                itemView = item.info.itemView,
+                marginTarget = item.info.messageView.parent as? View ?: item.info.itemView,
+                avatarView = item.info.avatarView,
+                nicknameView = item.info.nicknameView
+            )
+        }
+        return true
+    }
+
+    private fun visibleClusterItem(view: View): VisibleClusterItem? {
+        val root = findItemRoot(view) ?: view
+        val info = readDirectTextItemInfo(root) ?: return null
+        return VisibleClusterItem(root, info)
+    }
+
+    private fun canGroupVisible(current: TextItemInfo, neighbor: TextItemInfo): Boolean {
+        return ChatBubbleStylePolicy.canGroupWith(
+            current = current.toCandidate(null),
+            neighbor = neighbor.toCandidate(null)
         )
     }
 
@@ -876,6 +1274,7 @@ object ModernChatBubbleStyler {
             msgView = info.messageView,
             side = info.side,
             position = position,
+            stableKey = currentMeta?.stableKey ?: visualStableKey(info.messageView, info.itemView),
             itemView = info.itemView,
             marginTarget = info.messageView.parent as? View ?: info.itemView,
             avatarView = info.avatarView,
@@ -931,6 +1330,7 @@ object ModernChatBubbleStyler {
             msgView = info.messageView,
             side = side,
             position = cached.position,
+            stableKey = meta.stableKey,
             itemView = info.itemView,
             marginTarget = info.messageView.parent as? View ?: info.itemView,
             avatarView = info.avatarView,
@@ -987,14 +1387,27 @@ object ModernChatBubbleStyler {
         val stableKey = meta.stableKey
         val cached = bubbleDecisionCache[stableKey]
         if (cached != null && cached.side == side) {
-            if (!cached.refreshableFromTop) {
-                return cached.position
+            val canGrowWithNewNeighbor = ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
+                side = side,
+                cachedPosition = cached.position,
+                computedPosition = computedPosition
+            )
+            if (!canGrowWithNewNeighbor) {
+                if (!cached.refreshableFromTop) {
+                    return cached.position
+                }
+                val nextRefreshable = mayRefreshTopDecision && previous == null
+                bubbleDecisionCache[stableKey] = BubbleDecision(
+                    side = side,
+                    position = computedPosition,
+                    refreshableFromTop = nextRefreshable
+                )
+                return computedPosition
             }
-            val nextRefreshable = mayRefreshTopDecision && previous == null
             bubbleDecisionCache[stableKey] = BubbleDecision(
                 side = side,
                 position = computedPosition,
-                refreshableFromTop = nextRefreshable
+                refreshableFromTop = false
             )
             return computedPosition
         }
@@ -1202,6 +1615,7 @@ object ModernChatBubbleStyler {
         msgView: View,
         side: Side,
         position: GroupPosition,
+        stableKey: String,
         itemView: View?,
         marginTarget: View,
         avatarView: View?,
@@ -1209,8 +1623,9 @@ object ModernChatBubbleStyler {
     ) {
         XposedHelpers.setAdditionalInstanceField(msgView, keyCandidate, true)
         XposedHelpers.setAdditionalInstanceField(msgView, keyLastTextHash, textHash(msgView))
-        setTextColors(msgView, if (side == Side.RIGHT) rightTextColor else leftTextColor)
-        setBubbleBackground(msgView, side, position)
+        val palette = ModernChatBubbleColors.palette(side)
+        setTextColors(msgView, palette.textColor)
+        setBubbleBackground(msgView, side, position, stableKey, palette)
 
         val horizontal = dp(msgView, 13f)
         val vertical = dp(msgView, 8.5f)
@@ -1383,33 +1798,78 @@ object ModernChatBubbleStyler {
         }
     }
 
-    private fun setBubbleBackground(msgView: View, side: Side, position: GroupPosition) {
+    private fun setBubbleBackground(
+        msgView: View,
+        side: Side,
+        position: GroupPosition,
+        stableKey: String,
+        palette: ChatBubbleStylePolicy.BubblePalette
+    ) {
         XposedHelpers.setAdditionalInstanceField(msgView, keyLastSide, side)
         XposedHelpers.setAdditionalInstanceField(msgView, keyLastPosition, position)
         XposedHelpers.setAdditionalInstanceField(msgView, keyReplacingBackground, true)
         try {
-            msgView.background = createBubbleDrawable(msgView, side, position)
+            val state = renderState(stableKey, side, position)
+            val existingBubble = msgView.background as? ModernBubbleDrawable
+            val canUpdateExisting = existingBubble != null &&
+                    existingBubble.stableKey == stableKey &&
+                    existingBubble.side == side
+            if (canUpdateExisting) {
+                existingBubble?.update(
+                    nextState = state,
+                    nextPalette = palette,
+                    animateCorners = existingBubble.position != position
+                )
+            } else {
+                msgView.background = ModernBubbleDrawable(msgView.context, state, palette)
+            }
         } finally {
             XposedHelpers.removeAdditionalInstanceField(msgView, keyReplacingBackground)
         }
     }
 
-    private fun createBubbleDrawable(view: View, side: Side, position: GroupPosition): Drawable {
-        val normalColor = if (side == Side.RIGHT) rightBubbleColor else leftBubbleColor
-        val pressedColor = darkenColor(normalColor, 0.97f)
-        val drawable = StateListDrawable()
-        drawable.addState(
-            intArrayOf(android.R.attr.state_pressed),
-            createBubbleShape(view, side, position, pressedColor)
+    private fun createBubbleDrawable(
+        view: View,
+        side: Side,
+        position: GroupPosition,
+        stableKey: String
+    ): Drawable {
+        val palette = ModernChatBubbleColors.palette(side)
+        return ModernBubbleDrawable(view.context, renderState(stableKey, side, position), palette)
+    }
+
+    private fun renderState(
+        stableKey: String,
+        side: Side,
+        position: GroupPosition
+    ): ChatBubbleStylePolicy.RenderState {
+        return ChatBubbleStylePolicy.RenderState(
+            stableKey = stableKey,
+            side = side,
+            position = position,
+            showAvatar = ChatBubbleStylePolicy.showAvatar(position),
+            showNickname = ChatBubbleStylePolicy.showNickname(position),
+            topMarginDp = ChatBubbleStylePolicy.topMarginDp(position),
+            cornerRadii = ChatBubbleStylePolicy.cornerRadii(side, position)
         )
-        drawable.addState(intArrayOf(), createBubbleShape(view, side, position, normalColor))
-        return drawable
+    }
+
+    private fun visualStableKey(msgView: View, itemView: View?): String {
+        val existingBubble = msgView.background as? ModernBubbleDrawable
+        if (existingBubble != null) {
+            return existingBubble.stableKey
+        }
+        val item = itemView ?: findItemRoot(msgView)
+        val side = XposedHelpers.getAdditionalInstanceField(msgView, keyLastSide) as? Side
+        val text = extractText(msgView)?.hashCode() ?: 0
+        return "visual:${System.identityHashCode(item ?: msgView)}:${side ?: "unknown"}:$text"
     }
 
     private fun createBubbleShape(
         view: View,
         side: Side,
         position: GroupPosition,
+        palette: ChatBubbleStylePolicy.BubblePalette,
         color: Int
     ): GradientDrawable {
         val radii = ChatBubbleStylePolicy.cornerRadii(side, position)
@@ -1435,7 +1895,9 @@ object ModernChatBubbleStyler {
                 bottomLeft,
                 bottomLeft
             )
-            setStroke(dp(view, 1f), Color.argb(150, 255, 255, 255))
+            if (palette.strokeWidthDp > 0f && Color.alpha(palette.strokeColor) > 0) {
+                setStroke(dp(view, palette.strokeWidthDp), palette.strokeColor)
+            }
         }
     }
 
@@ -1975,6 +2437,11 @@ object ModernChatBubbleStyler {
             return extractRowMeta(value)
         }
 
+        fun invalidate(adapter: Any) {
+            sourceCache.remove(adapter)
+            indexCache.remove(adapter)
+        }
+
         fun readWindow(
             adapter: Any,
             startPosition: Int,
@@ -2000,8 +2467,24 @@ object ModernChatBubbleStyler {
             return MessageWindow(
                 sourceLabel = source.label,
                 entries = entries,
-                byPosition = entries.associateBy { it.position }
+                byPosition = entries.associateBy { it.position },
+                byStableKey = entries.associateBy { it.meta.stableKey }
             )
+        }
+
+        fun readWindowForBoundStableKeys(
+            adapter: Any,
+            stableKeys: List<String>,
+            padding: Int
+        ): MessageWindow? {
+            if (stableKeys.isEmpty()) {
+                return null
+            }
+            val indexed = readIndexedMessages(adapter) ?: return null
+            buildWindowAroundStableKeys(indexed, stableKeys, padding)?.let { return it }
+            indexCache.remove(adapter)
+            val refreshed = readIndexedMessages(adapter) ?: return null
+            return buildWindowAroundStableKeys(refreshed, stableKeys, padding)
         }
 
         fun readWindowForVisibleItems(
@@ -2040,7 +2523,33 @@ object ModernChatBubbleStyler {
             return MessageWindow(
                 sourceLabel = "${indexed.sourceLabel}.indexed",
                 entries = entries,
-                byPosition = entries.associateBy { it.position }
+                byPosition = entries.associateBy { it.position },
+                byStableKey = entries.associateBy { it.meta.stableKey }
+            )
+        }
+
+        private fun buildWindowAroundStableKeys(
+            indexed: IndexedMessages,
+            stableKeys: List<String>,
+            padding: Int
+        ): MessageWindow? {
+            val positions = stableKeys
+                .mapNotNull { indexed.byStableKey[it]?.position }
+                .distinct()
+            if (positions.isEmpty()) {
+                return null
+            }
+            val start = maxOf(indexed.firstPosition, (positions.minOrNull() ?: return null) - padding)
+            val end = minOf(indexed.lastPosition, (positions.maxOrNull() ?: return null) + padding)
+            val entries = indexed.entries.filter { it.position in start..end }
+            if (entries.isEmpty()) {
+                return null
+            }
+            return MessageWindow(
+                sourceLabel = "${indexed.sourceLabel}.bound",
+                entries = entries,
+                byPosition = entries.associateBy { it.position },
+                byStableKey = entries.associateBy { it.meta.stableKey }
             )
         }
 
@@ -2162,7 +2671,8 @@ object ModernChatBubbleStyler {
                 sourceLabel = source.label,
                 firstPosition = entries.first().position,
                 lastPosition = entries.last().position,
-                entries = entries
+                entries = entries,
+                byStableKey = entries.associateBy { it.meta.stableKey }
             )
             indexCache[adapter] = indexed
             return indexed
@@ -2413,7 +2923,7 @@ object ModernChatBubbleStyler {
             }
             val normalizedContent = normalizeMessageContent(content)
             return RowMeta(
-                isTextMessage = isTextLikeMessage(type, content),
+                isTextMessage = ChatBubbleStylePolicy.isTextLikeWechatMessage(type, content),
                 side = side,
                 senderKey = senderKey,
                 createTimeMs = createTime,
@@ -2650,19 +3160,6 @@ object ModernChatBubbleStyler {
             return (appTitle ?: body).takeIf { it.isNotBlank() }
         }
 
-        private fun isTextLikeMessage(type: Int?, content: String?): Boolean {
-            if (type == null || type == 1) {
-                return true
-            }
-            return isReferenceMessageContent(content)
-        }
-
-        private fun isReferenceMessageContent(content: String?): Boolean {
-            val text = content ?: return false
-            return text.indexOf("<refermsg", ignoreCase = true) >= 0 ||
-                    text.indexOf("<refermessage", ignoreCase = true) >= 0
-        }
-
         private fun extractXmlTag(text: String, tagName: String): String? {
             val pattern = Regex("<$tagName(?:\\s[^>]*)?>(.*?)</$tagName>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
             val raw = pattern.find(text)?.groupValues?.getOrNull(1)?.trim() ?: return null
@@ -2839,7 +3336,8 @@ object ModernChatBubbleStyler {
     private data class MessageWindow(
         val sourceLabel: String,
         val entries: List<WindowEntry>,
-        val byPosition: Map<Int, WindowEntry>
+        val byPosition: Map<Int, WindowEntry>,
+        val byStableKey: Map<String, WindowEntry>
     )
 
     private data class WindowEntry(
@@ -2863,12 +3361,24 @@ object ModernChatBubbleStyler {
         val sourceLabel: String,
         val firstPosition: Int,
         val lastPosition: Int,
-        val entries: List<WindowEntry>
+        val entries: List<WindowEntry>,
+        val byStableKey: Map<String, WindowEntry>
     )
 
     private data class VisibleTextItem(
         val requestPosition: Int,
         val visibleIndex: Int,
+        val itemView: View,
+        val info: TextItemInfo,
+        val boundStableKey: String?
+    )
+
+    private data class RememberedBoundState(
+        val position: Int,
+        val stableKey: String
+    )
+
+    private data class VisibleClusterItem(
         val itemView: View,
         val info: TextItemInfo
     )

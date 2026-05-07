@@ -14,6 +14,8 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
+import java.util.Collections
+import java.util.WeakHashMap
 
 object ModernChatBubbleHooker : HookerProvider {
     private const val enableModernChatBubble = true
@@ -23,12 +25,15 @@ object ModernChatBubbleHooker : HookerProvider {
     private val hookedRecyclerClasses = mutableSetOf<String>()
     private val hookedAdapterClasses = mutableSetOf<String>()
     private val hookedBindMethods = mutableSetOf<String>()
+    private val hookedNotifyMethods = mutableSetOf<String>()
     private val hookedChattingItemMethods = mutableSetOf<String>()
     private val drawProbeLogs = mutableSetOf<String>()
     private val recyclerProbeLogs = mutableSetOf<String>()
+    private val adapterRecyclers = Collections.synchronizedMap(WeakHashMap<Any, MutableSet<ViewGroup>>())
     private var classLoadHookInstalled = false
     private const val keyPendingApply = "mdwechat_modern_chat_bubble_pending_apply"
     private const val keyPendingRecyclerApply = "mdwechat_modern_chat_bubble_pending_recycler_apply"
+    private const val keyPendingRecyclerApplyDirty = "mdwechat_modern_chat_bubble_pending_recycler_apply_dirty"
     private const val keyLastDrawSignature = "mdwechat_modern_chat_bubble_last_draw_signature"
     private const val bubbleProbeFile = "chat_bubble_probe.txt"
     private const val enableDrawApply = false
@@ -52,6 +57,8 @@ object ModernChatBubbleHooker : HookerProvider {
             )
         } else {
             listOf(
+                viewAttachHook,
+                recyclerViewAttachHook,
                 chattingItemBindHook,
                 chatAdapterBindHook,
                 recyclerViewAdapterBindHook
@@ -186,6 +193,9 @@ object ModernChatBubbleHooker : HookerProvider {
                 CC.Int,
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam?) {
+                        if (!enableVisibleWindowApply) {
+                            return
+                        }
                         val parent = param?.thisObject as? ViewGroup ?: return
                         scheduleRecyclerVisibleApply(parent, "onScrolled")
                     }
@@ -203,6 +213,9 @@ object ModernChatBubbleHooker : HookerProvider {
                 CC.Int,
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam?) {
+                        if (!enableVisibleWindowApply) {
+                            return
+                        }
                         val parent = param?.thisObject as? ViewGroup ?: return
                         scheduleRecyclerVisibleApply(parent, "onScrollStateChanged")
                     }
@@ -312,18 +325,14 @@ object ModernChatBubbleHooker : HookerProvider {
                     val adapterClass = param.result as? Class<*> ?: return
                     when {
                         className == "com.tencent.mm.view.recyclerview.WxRecyclerView" -> {
-                            if (enableLegacyBubbleFallbacks) {
-                                hookRecyclerViewClass(adapterClass)
-                            }
+                            hookRecyclerViewClass(adapterClass)
                             logOnce(
                                 "loadClass.$className",
                                 "ModernChatBubble class-load hooked $className loader=${adapterClass.classLoader}"
                             )
                         }
                         className == "com.tencent.mm.pluginsdk.ui.tools.ScrollControlRecyclerView" -> {
-                            if (enableLegacyBubbleFallbacks) {
-                                hookRecyclerViewClass(adapterClass)
-                            }
+                            hookRecyclerViewClass(adapterClass)
                             logOnce(
                                 "loadClass.$className",
                                 "ModernChatBubble class-load hooked $className loader=${adapterClass.classLoader}"
@@ -456,7 +465,7 @@ object ModernChatBubbleHooker : HookerProvider {
                     val holder = param?.args?.getOrNull(0) ?: return
                     val msgInfo = param.args?.getOrNull(2) ?: return
                     val itemView = extractItemView(holder) ?: return
-                    ModernChatBubbleRenderer.applyFromChattingItemBind(itemView, msgInfo)
+                    ModernChatBubbleRenderer.applyFromChattingItemBind(itemView, holder, msgInfo)
                 }
             })
             true
@@ -499,9 +508,10 @@ object ModernChatBubbleHooker : HookerProvider {
                 }
             current = current.superclass
         }
+        val notifyHooks = hookAdapterNotifyMethods(adapterClass)
         logOnce(
             "concreteAdapter.$className",
-            "ModernChatBubble concrete adapter class=$className bindHooks=$hooked"
+            "ModernChatBubble concrete adapter class=$className bindHooks=$hooked notifyHooks=$notifyHooks"
         )
     }
 
@@ -519,7 +529,16 @@ object ModernChatBubbleHooker : HookerProvider {
                     val holder = param.args?.getOrNull(0) ?: return
                     val position = param.args?.getOrNull(1) as? Int ?: return
                     val itemView = extractItemView(holder) ?: return
-                    ModernChatBubbleRenderer.applyFromAdapterBind(adapter, position, itemView)
+                    val recycler = rememberRecyclerFromItem(adapter, itemView)
+                    val applied = ModernChatBubbleRenderer.applyFromAdapterBind(adapter, position, itemView)
+                    ModernChatBubbleStyler.debugBubbleProbe(
+                        itemView.context,
+                        "hookBind method=${method.name} adapter=${adapter.javaClass.name} " +
+                                "pos=$position applied=$applied recycler=${recycler?.javaClass?.name}"
+                    )
+                    if (applied && recycler != null) {
+                        scheduleRecyclerVisibleApply(recycler, "bind:${method.name}")
+                    }
                 }
             })
             true
@@ -529,6 +548,61 @@ object ModernChatBubbleHooker : HookerProvider {
                         throwable.javaClass.simpleName
             )
             false
+        }
+    }
+
+    private fun hookAdapterNotifyMethods(adapterClass: Class<*>): Int {
+        var hooked = 0
+        var current: Class<*>? = adapterClass
+        while (current != null && current != Any::class.java) {
+            current.declaredMethods
+                .filter { method -> isAdapterNotifyLikeMethod(method) }
+                .forEach { method ->
+                    if (hookAdapterNotifyMethod(method)) {
+                        hooked++
+                    }
+                }
+            current = current.superclass
+        }
+        return hooked
+    }
+
+    private fun hookAdapterNotifyMethod(method: Method): Boolean {
+        return try {
+            val methodKey = bindMethodKey(method)
+            if (hookedNotifyMethods.contains(methodKey)) {
+                return false
+            }
+            hookedNotifyMethods.add(methodKey)
+            method.isAccessible = true
+            XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam?) {
+                    val adapter = param?.thisObject ?: return
+                    scheduleKnownRecyclerVisibleApply(adapter, "notify:${method.name}")
+                }
+            })
+            true
+        } catch (throwable: Throwable) {
+            LogUtil.log(
+                "ModernChatBubbleHooker notify hook skip ${method.declaringClass.name}.${method.name}: " +
+                        throwable.javaClass.simpleName
+            )
+            false
+        }
+    }
+
+    private fun isAdapterNotifyLikeMethod(method: Method): Boolean {
+        if (Modifier.isStatic(method.modifiers) || method.returnType != Void.TYPE) {
+            return false
+        }
+        if (!method.name.startsWith("notify")) {
+            return false
+        }
+        return method.parameterTypes.all { param ->
+            param == CC.Int ||
+                    param == Integer::class.java ||
+                    param == Any::class.java ||
+                    param.name == "java.lang.Object"
         }
     }
 
@@ -634,15 +708,19 @@ object ModernChatBubbleHooker : HookerProvider {
             return
         }
         hookConcreteAdapter(adapter.javaClass)
+        rememberRecyclerForAdapter(adapter, parent)
         val position = getChildAdapterPosition(parent, child)
         if (position >= 0) {
-            val applied = ModernChatBubbleStyler.applyFromAdapterBind(adapter, position, child)
+            val applied = ModernChatBubbleRenderer.applyFromAdapterBind(adapter, position, child)
+            if (applied) {
+                scheduleRecyclerVisibleApply(parent, "child")
+            }
             if (!applied && enableVisibleWindowApply) {
                 child.post {
                     val currentAdapter = getRecyclerAdapter(parent) ?: return@post
                     val currentPosition = getChildAdapterPosition(parent, child)
                     if (currentPosition >= 0) {
-                        ModernChatBubbleStyler.applyFromAdapterBind(currentAdapter, currentPosition, child)
+                        ModernChatBubbleRenderer.applyFromAdapterBind(currentAdapter, currentPosition, child)
                     }
                     scheduleRecyclerVisibleApply(parent, "child.post")
                 }
@@ -653,44 +731,64 @@ object ModernChatBubbleHooker : HookerProvider {
     private fun installRecyclerAdapterHooks(recycler: ViewGroup, source: String) {
         val adapter = getRecyclerAdapter(recycler) ?: return
         hookConcreteAdapter(adapter.javaClass)
+        rememberRecyclerForAdapter(adapter, recycler)
         probeRecyclerAdapter(recycler, adapter, source)
-        if (enableVisibleWindowApply) {
-            applyVisibleChildrenFromRecycler(recycler, adapter, source)
-            scheduleRecyclerVisibleApply(recycler, "$source.posted")
-        }
+        scheduleRecyclerVisibleApply(recycler, "$source.posted")
     }
 
     private fun scheduleRecyclerVisibleApply(recycler: ViewGroup, source: String) {
-        if (!enableVisibleWindowApply) {
+        if (!isChatRecyclerView(recycler)) {
             return
         }
-        if (!isChatRecyclerView(recycler) ||
-            XposedHelpers.getAdditionalInstanceField(recycler, keyPendingRecyclerApply) == true
-        ) {
+        if (XposedHelpers.getAdditionalInstanceField(recycler, keyPendingRecyclerApply) == true) {
+            XposedHelpers.setAdditionalInstanceField(recycler, keyPendingRecyclerApplyDirty, true)
+            ModernChatBubbleStyler.debugBubbleProbe(
+                recycler.context,
+                "scheduleVisible dirty source=$source children=${recycler.childCount}"
+            )
             return
         }
         XposedHelpers.setAdditionalInstanceField(recycler, keyPendingRecyclerApply, true)
+        ModernChatBubbleStyler.debugBubbleProbe(
+            recycler.context,
+            "scheduleVisible start source=$source children=${recycler.childCount}"
+        )
         recycler.post {
-            XposedHelpers.removeAdditionalInstanceField(recycler, keyPendingRecyclerApply)
-            val adapter = getRecyclerAdapter(recycler) ?: return@post
-            val applied = applyVisibleChildrenFromRecycler(recycler, adapter, source)
-            if (applied == 0 && recycler.childCount > 0) {
-                recycler.postDelayed({
-                    val lateAdapter = getRecyclerAdapter(recycler) ?: return@postDelayed
-                    val lateApplied = applyVisibleChildrenFromRecycler(recycler, lateAdapter, "$source.afterLayout")
-                    if (lateApplied == 0 && recycler.childCount > 0) {
-                        recycler.postDelayed({
-                            val finalAdapter = getRecyclerAdapter(recycler) ?: return@postDelayed
-                            applyVisibleChildrenFromRecycler(recycler, finalAdapter, "$source.afterDraw")
-                        }, 320L)
-                    }
-                }, 80L)
+            val adapter = getRecyclerAdapter(recycler)
+            if (adapter == null) {
+                XposedHelpers.removeAdditionalInstanceField(recycler, keyPendingRecyclerApply)
+                ModernChatBubbleStyler.debugBubbleProbe(
+                    recycler.context,
+                    "scheduleVisible noAdapter source=$source"
+                )
+                return@post
             }
+            val applied = applyVisibleChildrenFromRecycler(recycler, adapter, source)
+            recycler.postDelayed({
+                XposedHelpers.removeAdditionalInstanceField(recycler, keyPendingRecyclerApply)
+                val lateAdapter = getRecyclerAdapter(recycler) ?: return@postDelayed
+                val lateApplied = applyVisibleChildrenFromRecycler(recycler, lateAdapter, "$source.afterLayout")
+                if (applied == 0 && lateApplied == 0 && recycler.childCount > 0) {
+                    recycler.postDelayed({
+                        val finalAdapter = getRecyclerAdapter(recycler) ?: return@postDelayed
+                        applyVisibleChildrenFromRecycler(recycler, finalAdapter, "$source.afterDraw")
+                    }, 240L)
+                }
+                if (XposedHelpers.getAdditionalInstanceField(recycler, keyPendingRecyclerApplyDirty) == true) {
+                    XposedHelpers.removeAdditionalInstanceField(recycler, keyPendingRecyclerApplyDirty)
+                    scheduleRecyclerVisibleApply(recycler, "$source.dirty")
+                }
+            }, 120L)
         }
     }
 
     private fun applyVisibleChildrenFromRecycler(recycler: ViewGroup, adapter: Any, source: String): Int {
-        val applied = ModernChatBubbleStyler.applyVisibleChildrenFromAdapter(recycler, adapter)
+        val applied = ModernChatBubbleRenderer.applyVisibleChildrenFromAdapter(recycler, adapter)
+        ModernChatBubbleStyler.debugBubbleProbe(
+            recycler.context,
+            "visibleApply source=$source adapter=${adapter.javaClass.name} " +
+                    "children=${recycler.childCount} applied=$applied"
+        )
         if (ModernChatBubbleStyler.shouldWriteVerboseProbe()) {
             ModernChatBubbleStyler.probeRuntime(
                 recycler.context,
@@ -700,6 +798,51 @@ object ModernChatBubbleHooker : HookerProvider {
             )
         }
         return applied
+    }
+
+    private fun scheduleKnownRecyclerVisibleApply(adapter: Any, source: String) {
+        ModernChatBubbleStyler.invalidateAdapterData(adapter)
+        val recyclers = synchronized(adapterRecyclers) {
+            adapterRecyclers[adapter]?.toList().orEmpty()
+        }
+        recyclers.forEach { recycler ->
+            if (getRecyclerAdapter(recycler) === adapter) {
+                scheduleRecyclerVisibleApply(recycler, source)
+            }
+        }
+    }
+
+    private fun rememberRecyclerFromItem(adapter: Any, itemView: View): ViewGroup? {
+        val recycler = findRecyclerParent(itemView) ?: return null
+        rememberRecyclerForAdapter(adapter, recycler)
+        return recycler
+    }
+
+    private fun rememberRecyclerForAdapter(adapter: Any, recycler: ViewGroup) {
+        if (!isChatRecyclerView(recycler)) {
+            return
+        }
+        synchronized(adapterRecyclers) {
+            val recyclers = adapterRecyclers.getOrPut(adapter) {
+                Collections.synchronizedSet(
+                    Collections.newSetFromMap(WeakHashMap<ViewGroup, Boolean>())
+                )
+            }
+            recyclers.add(recycler)
+        }
+    }
+
+    private fun findRecyclerParent(view: View): ViewGroup? {
+        var current = view.parent as? View
+        var depth = 0
+        while (current != null && depth < 12) {
+            if (current is ViewGroup && isRecyclerViewLike(current)) {
+                return current
+            }
+            current = current.parent as? View
+            depth++
+        }
+        return null
     }
 
     private fun getRecyclerAdapter(parent: ViewGroup): Any? {
