@@ -2,6 +2,7 @@ package com.blanke.mdwechat.util
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -141,6 +142,76 @@ class ChatBubbleStylePolicyTest {
             ),
             0f
         )
+    }
+
+    @Test
+    fun defaultBubblePaletteKeepsModernColorsAndRemovesWhiteOutline() {
+        val right = ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.RIGHT)
+        val left = ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.LEFT)
+
+        assertEquals(ChatBubbleStylePolicy.DEFAULT_RIGHT_BUBBLE_COLOR, right.bubbleColor)
+        assertEquals(ChatBubbleStylePolicy.DEFAULT_RIGHT_TEXT_COLOR, right.textColor)
+        assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, right.strokeColor)
+        assertEquals(0f, right.strokeWidthDp, 0f)
+        assertEquals(ChatBubbleStylePolicy.DEFAULT_LEFT_BUBBLE_COLOR, left.bubbleColor)
+        assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, left.strokeColor)
+        assertEquals(0f, left.strokeWidthDp, 0f)
+    }
+
+    @Test
+    fun customBubbleTintOverridesSideFillColors() {
+        val config = ChatBubbleStylePolicy.BubbleColorConfig(
+            useCustomBubbleTint = true,
+            leftBubbleTint = 0xFF112233.toInt(),
+            rightBubbleTint = 0xFF445566.toInt()
+        )
+
+        assertEquals(
+            0xFF112233.toInt(),
+            ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.LEFT, config).bubbleColor
+        )
+        assertEquals(
+            0xFF445566.toInt(),
+            ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.RIGHT, config).bubbleColor
+        )
+    }
+
+    @Test
+    fun customTextColorsOverrideSideTextColors() {
+        val config = ChatBubbleStylePolicy.BubbleColorConfig(
+            useCustomTextColor = true,
+            leftTextColor = 0xFFABCDEF.toInt(),
+            rightTextColor = 0xFF123456.toInt()
+        )
+
+        assertEquals(
+            0xFFABCDEF.toInt(),
+            ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.LEFT, config).textColor
+        )
+        assertEquals(
+            0xFF123456.toInt(),
+            ChatBubbleStylePolicy.bubblePalette(ChatBubbleStylePolicy.Side.RIGHT, config).textColor
+        )
+    }
+
+    @Test
+    fun paletteSignatureChangesWhenCustomColorsChange() {
+        val first = ChatBubbleStylePolicy.bubblePalette(
+            ChatBubbleStylePolicy.Side.RIGHT,
+            ChatBubbleStylePolicy.BubbleColorConfig(
+                useCustomBubbleTint = true,
+                rightBubbleTint = 0xFF445566.toInt()
+            )
+        )
+        val second = ChatBubbleStylePolicy.bubblePalette(
+            ChatBubbleStylePolicy.Side.RIGHT,
+            ChatBubbleStylePolicy.BubbleColorConfig(
+                useCustomBubbleTint = true,
+                rightBubbleTint = 0xFF667788.toInt()
+            )
+        )
+
+        assertNotEquals(first.signature, second.signature)
     }
 
     @Test

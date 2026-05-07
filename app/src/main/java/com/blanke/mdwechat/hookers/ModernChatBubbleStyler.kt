@@ -54,10 +54,6 @@ object ModernChatBubbleStyler {
     private const val bubbleProbeFile = "chat_bubble_probe.txt"
     private const val enableVerboseBubbleProbe = false
 
-    private val rightBubbleColor = Color.parseColor("#C5EFD1")
-    private val rightTextColor = Color.parseColor("#042100")
-    private val leftBubbleColor = Color.parseColor("#FCFCF8")
-    private val leftTextColor = Color.parseColor("#1A1C19")
     private val shadowColor = Color.argb(32, 0, 0, 0)
     private val diagnosticLogs = mutableSetOf<String>()
     private val adapterProbeLogs = mutableSetOf<String>()
@@ -1209,7 +1205,8 @@ object ModernChatBubbleStyler {
     ) {
         XposedHelpers.setAdditionalInstanceField(msgView, keyCandidate, true)
         XposedHelpers.setAdditionalInstanceField(msgView, keyLastTextHash, textHash(msgView))
-        setTextColors(msgView, if (side == Side.RIGHT) rightTextColor else leftTextColor)
+        val palette = ModernChatBubbleColors.palette(side)
+        setTextColors(msgView, palette.textColor)
         setBubbleBackground(msgView, side, position)
 
         val horizontal = dp(msgView, 13f)
@@ -1395,14 +1392,13 @@ object ModernChatBubbleStyler {
     }
 
     private fun createBubbleDrawable(view: View, side: Side, position: GroupPosition): Drawable {
-        val normalColor = if (side == Side.RIGHT) rightBubbleColor else leftBubbleColor
-        val pressedColor = darkenColor(normalColor, 0.97f)
+        val palette = ModernChatBubbleColors.palette(side)
         val drawable = StateListDrawable()
         drawable.addState(
             intArrayOf(android.R.attr.state_pressed),
-            createBubbleShape(view, side, position, pressedColor)
+            createBubbleShape(view, side, position, palette, palette.pressedBubbleColor)
         )
-        drawable.addState(intArrayOf(), createBubbleShape(view, side, position, normalColor))
+        drawable.addState(intArrayOf(), createBubbleShape(view, side, position, palette, palette.bubbleColor))
         return drawable
     }
 
@@ -1410,6 +1406,7 @@ object ModernChatBubbleStyler {
         view: View,
         side: Side,
         position: GroupPosition,
+        palette: ChatBubbleStylePolicy.BubblePalette,
         color: Int
     ): GradientDrawable {
         val radii = ChatBubbleStylePolicy.cornerRadii(side, position)
@@ -1435,7 +1432,9 @@ object ModernChatBubbleStyler {
                 bottomLeft,
                 bottomLeft
             )
-            setStroke(dp(view, 1f), Color.argb(150, 255, 255, 255))
+            if (palette.strokeWidthDp > 0f && Color.alpha(palette.strokeColor) > 0) {
+                setStroke(dp(view, palette.strokeWidthDp), palette.strokeColor)
+            }
         }
     }
 

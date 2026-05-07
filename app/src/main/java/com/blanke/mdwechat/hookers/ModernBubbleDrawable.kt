@@ -11,25 +11,21 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
 import com.blanke.mdwechat.util.ChatBubbleStylePolicy
-import com.blanke.mdwechat.util.ChatBubbleStylePolicy.Side
 
 class ModernBubbleDrawable(
     context: Context,
-    private val state: ChatBubbleStylePolicy.RenderState
+    private val state: ChatBubbleStylePolicy.RenderState,
+    private val palette: ChatBubbleStylePolicy.BubblePalette
 ) : Drawable() {
     private val density = context.resources.displayMetrics.density
-    private val baseColor = if (state.side == Side.RIGHT) {
-        Color.parseColor("#C5EFD1")
-    } else {
-        Color.parseColor("#FCFCF8")
-    }
+    private val baseColor = palette.bubbleColor
     private val gradientColors = intArrayOf(lighten(baseColor), baseColor, darken(baseColor))
     private val gradientStops = floatArrayOf(0f, 0.55f, 1f)
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dp(1f)
-        color = Color.argb(140, 255, 255, 255)
+        strokeWidth = dp(palette.strokeWidthDp)
+        color = palette.strokeColor
     }
     private val path = Path()
     private val rect = RectF()
@@ -45,7 +41,9 @@ class ModernBubbleDrawable(
         fillPaint.style = Paint.Style.FILL
         canvas.drawPath(path, fillPaint)
         fillPaint.shader = null
-        canvas.drawPath(path, strokePaint)
+        if (strokePaint.strokeWidth > 0f && Color.alpha(strokePaint.color) > 0) {
+            canvas.drawPath(path, strokePaint)
+        }
     }
 
     override fun setAlpha(alpha: Int) {
@@ -77,7 +75,10 @@ class ModernBubbleDrawable(
         cachedBottom = currentBounds.bottom
 
         rect.set(currentBounds)
-        rect.inset(dp(0.5f), dp(0.5f))
+        val inset = strokePaint.strokeWidth / 2f
+        if (inset > 0f && Color.alpha(strokePaint.color) > 0) {
+            rect.inset(inset, inset)
+        }
         path.reset()
         path.addRoundRect(rect, radiiPx(), Path.Direction.CW)
         cachedGradient = LinearGradient(

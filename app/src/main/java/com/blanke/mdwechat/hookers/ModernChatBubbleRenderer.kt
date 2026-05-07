@@ -13,7 +13,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.blanke.mdwechat.util.ChatBubbleStylePolicy
 import com.blanke.mdwechat.util.RuntimeProbe
-import com.blanke.mdwechat.util.ChatBubbleStylePolicy.Side
 import de.robv.android.xposed.XposedHelpers
 import java.util.Collections
 import java.util.WeakHashMap
@@ -32,10 +31,6 @@ object ModernChatBubbleRenderer {
     private const val keyBoundaryRefreshSignature = "mdwechat_native_bubble_boundary_refresh_signature"
     private const val probeFile = "native_bubble_renderer.txt"
     private const val enableRendererProbe = false
-    private val rightTextColor = Color.parseColor("#042100")
-    private val leftTextColor = Color.parseColor("#1A1C19")
-    private val rightQuoteTextColor = Color.parseColor("#31583D")
-    private val leftQuoteTextColor = Color.parseColor("#666B63")
     private val probeKeys = mutableSetOf<String>()
     private val timeTextPattern = Regex("^\\d{1,2}:\\d{2}$")
     private val resourceIdCache = Collections.synchronizedMap(WeakHashMap<Context, MutableMap<String, Int>>())
@@ -75,23 +70,24 @@ object ModernChatBubbleRenderer {
             return false
         }
         val renderState = applyVisibleBoundaries(itemView, state)
-        val signature = renderSignature(renderState, text)
+        val palette = ModernChatBubbleColors.palette(renderState.side)
+        val signature = renderSignature(renderState, text, palette)
         if (isCurrentRender(itemView, messageView, renderState, signature)) {
             syncReusableState(itemView, messageView, renderState)
             scheduleBoundaryRefresh(itemView, state, renderState, source)
             return true
         }
         clearOriginalBubbleContainers(messageView)
-        messageView.background = ModernBubbleDrawable(messageView.context, renderState)
+        messageView.background = ModernBubbleDrawable(messageView.context, renderState, palette)
         messageView.setPadding(dp(messageView, 13f), dp(messageView, 8.5f), dp(messageView, 13f), dp(messageView, 8.5f))
-        setTextColor(messageView, if (renderState.side == Side.RIGHT) rightTextColor else leftTextColor)
+        setTextColor(messageView, palette.textColor)
         applyShadow(messageView, renderState)
         disableAncestorClipping(messageView)
 
         val marginTarget = messageView.parent as? View ?: messageView
         setTopMargin(marginTarget, dp(messageView, renderState.topMarginDp))
         normalizeMessageColumn(itemView, messageView, renderState)
-        styleQuoteBlock(itemView, messageView, renderState)
+        styleQuoteBlock(itemView, messageView, renderState, palette)
         setAvatarVisibility(findViewByResourceName(itemView, resourceAvatar), renderState.showAvatar)
         setNicknameVisibility(findNicknameView(itemView), renderState.showNickname)
         normalizeRow(itemView, messageView, renderState)
@@ -202,7 +198,8 @@ object ModernChatBubbleRenderer {
     private fun styleQuoteBlock(
         itemView: View,
         messageView: View,
-        state: ChatBubbleStylePolicy.RenderState
+        state: ChatBubbleStylePolicy.RenderState,
+        palette: ChatBubbleStylePolicy.BubblePalette
     ) {
         val quoteText = findViewByResourceName(itemView, resourceQuoteText) ?: return
         val quote = renderedText(quoteText)
@@ -219,12 +216,9 @@ object ModernChatBubbleRenderer {
             background = null
         }
 
-        quoteContainer.background = createQuoteDrawable(quoteContainer, state)
+        quoteContainer.background = createQuoteDrawable(quoteContainer, palette)
         quoteContainer.minimumHeight = 0
-        setTextColor(
-            quoteText,
-            if (state.side == Side.RIGHT) rightQuoteTextColor else leftQuoteTextColor
-        )
+        setTextColor(quoteText, palette.quoteTextColor)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             quoteContainer.elevation = dp(quoteContainer, 1f).toFloat()
             quoteContainer.translationZ = 0f
@@ -241,21 +235,16 @@ object ModernChatBubbleRenderer {
         return value != "{source}" && value != "{title}" && value != "{content}"
     }
 
-    private fun createQuoteDrawable(view: View, state: ChatBubbleStylePolicy.RenderState): GradientDrawable {
-        val fill = if (state.side == Side.RIGHT) {
-            Color.parseColor("#D8F1DE")
-        } else {
-            Color.parseColor("#ECEEE8")
-        }
-        val stroke = if (state.side == Side.RIGHT) {
-            Color.argb(110, 255, 255, 255)
-        } else {
-            Color.argb(120, 255, 255, 255)
-        }
+    private fun createQuoteDrawable(
+        view: View,
+        palette: ChatBubbleStylePolicy.BubblePalette
+    ): GradientDrawable {
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(fill)
-            setStroke(dp(view, 0.75f), stroke)
+            setColor(palette.quoteFillColor)
+            if (Color.alpha(palette.quoteStrokeColor) > 0) {
+                setStroke(dp(view, 0.75f), palette.quoteStrokeColor)
+            }
             cornerRadius = dp(view, 5.5f).toFloat()
         }
     }
@@ -596,9 +585,10 @@ object ModernChatBubbleRenderer {
 
     private fun renderSignature(
         state: ChatBubbleStylePolicy.RenderState,
-        text: String
+        text: String,
+        palette: ChatBubbleStylePolicy.BubblePalette
     ): String {
-        return "${state.stableKey}:${state.side}:${state.position}:${text.hashCode()}"
+        return "${state.stableKey}:${state.side}:${state.position}:${text.hashCode()}:${palette.signature}"
     }
 
     private fun isCurrentRender(
