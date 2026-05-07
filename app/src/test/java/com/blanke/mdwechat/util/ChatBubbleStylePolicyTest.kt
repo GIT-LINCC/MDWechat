@@ -215,6 +215,55 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
+    fun cachedRightBubbleShapeCanGrowWhenNewNeighborArrives() {
+        assertTrue(
+            ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
+                ChatBubbleStylePolicy.Side.RIGHT,
+                ChatBubbleStylePolicy.GroupPosition.SINGLE,
+                ChatBubbleStylePolicy.GroupPosition.TOP
+            )
+        )
+        assertTrue(
+            ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
+                ChatBubbleStylePolicy.Side.RIGHT,
+                ChatBubbleStylePolicy.GroupPosition.BOTTOM,
+                ChatBubbleStylePolicy.GroupPosition.MIDDLE
+            )
+        )
+        assertFalse(
+            ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
+                ChatBubbleStylePolicy.Side.RIGHT,
+                ChatBubbleStylePolicy.GroupPosition.MIDDLE,
+                ChatBubbleStylePolicy.GroupPosition.BOTTOM
+            )
+        )
+        assertFalse(
+            ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
+                ChatBubbleStylePolicy.Side.LEFT,
+                ChatBubbleStylePolicy.GroupPosition.SINGLE,
+                ChatBubbleStylePolicy.GroupPosition.TOP
+            )
+        )
+    }
+
+    @Test
+    fun appendedRightMessageRegroupsExistingSingleMessage() {
+        val before = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(row("1", ChatBubbleStylePolicy.Side.RIGHT, "self", 1_000L, "test"))
+        )
+        val after = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(
+                row("1", ChatBubbleStylePolicy.Side.RIGHT, "self", 1_000L, "test"),
+                row("2", ChatBubbleStylePolicy.Side.RIGHT, "self", 2_000L, "test")
+            )
+        )
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.SINGLE, before.getValue("1").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, after.getValue("1").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, after.getValue("2").position)
+    }
+
+    @Test
     fun leftMessagesNeedKnownSenderBeforeGrouping() {
         val left = ChatBubbleStylePolicy.MessageCandidate(
             isTextMessage = true,
@@ -305,6 +354,39 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
+    fun nonTextMessagesStopRenderStateGrouping() {
+        val rows = listOf(
+            row("1", ChatBubbleStylePolicy.Side.RIGHT, "self", 1_000L, "a"),
+            row("2", ChatBubbleStylePolicy.Side.RIGHT, "self", 2_000L, "b"),
+            row("img", ChatBubbleStylePolicy.Side.RIGHT, "self", 3_000L, "[image]", isTextMessage = false)
+        )
+
+        val states = ChatBubbleStylePolicy.resolveRenderStates(rows)
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("1").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("2").position)
+        assertFalse(states.containsKey("img"))
+    }
+
+    @Test
+    fun wechatImageXmlIsNotTextLikeWhenTypeIsMissing() {
+        assertFalse(
+            ChatBubbleStylePolicy.isTextLikeWechatMessage(
+                null,
+                "wxid_abc:\n<msg><img aeskey=\"x\" /></msg>"
+            )
+        )
+        assertFalse(ChatBubbleStylePolicy.isTextLikeWechatMessage(null, null))
+        assertTrue(ChatBubbleStylePolicy.isTextLikeWechatMessage(null, "plain text"))
+        assertTrue(
+            ChatBubbleStylePolicy.isTextLikeWechatMessage(
+                49,
+                "<msg><appmsg><refermsg><content>reply</content></refermsg></appmsg></msg>"
+            )
+        )
+    }
+
+    @Test
     fun renderStatesCarryVisualContractForNativePainter() {
         val rows = listOf(
             row("1", ChatBubbleStylePolicy.Side.LEFT, "alice", 1_000L, "a"),
@@ -326,11 +408,12 @@ class ChatBubbleStylePolicyTest {
         side: ChatBubbleStylePolicy.Side,
         senderKey: String?,
         createTimeMs: Long,
-        text: String
+        text: String,
+        isTextMessage: Boolean = true
     ): ChatBubbleStylePolicy.MessageRow {
         return ChatBubbleStylePolicy.MessageRow(
             stableKey = stableKey,
-            isTextMessage = true,
+            isTextMessage = isTextMessage,
             side = side,
             senderKey = senderKey,
             createTimeMs = createTimeMs,

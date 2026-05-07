@@ -192,6 +192,23 @@ object ChatBubbleStylePolicy {
         )
     }
 
+    fun shouldUpdateCachedPositionForNeighborGrowth(
+        side: Side,
+        cachedPosition: GroupPosition,
+        computedPosition: GroupPosition
+    ): Boolean {
+        if (side != Side.RIGHT || cachedPosition == computedPosition) {
+            return false
+        }
+        return when (cachedPosition) {
+            GroupPosition.SINGLE -> computedPosition == GroupPosition.TOP ||
+                    computedPosition == GroupPosition.BOTTOM
+            GroupPosition.TOP,
+            GroupPosition.BOTTOM -> computedPosition == GroupPosition.MIDDLE
+            GroupPosition.MIDDLE -> false
+        }
+    }
+
     fun showAvatar(position: GroupPosition): Boolean {
         return position == GroupPosition.SINGLE || position == GroupPosition.BOTTOM
     }
@@ -274,6 +291,23 @@ object ChatBubbleStylePolicy {
         return currentSender == neighborSender
     }
 
+    fun isTextLikeWechatMessage(type: Int?, content: String?): Boolean {
+        if (isReferenceMessageContent(content)) {
+            return true
+        }
+        if (type == 1) {
+            return true
+        }
+        if (type != null) {
+            return false
+        }
+        val text = content?.trim().orEmpty()
+        if (text.isBlank() || isClearlyNonTextMessageContent(text)) {
+            return false
+        }
+        return true
+    }
+
     private fun isTimeSplit(
         older: MessageRow?,
         newer: MessageRow?,
@@ -282,6 +316,28 @@ object ChatBubbleStylePolicy {
         val olderTime = older?.createTimeMs ?: return false
         val newerTime = newer?.createTimeMs ?: return false
         return kotlin.math.abs(newerTime - olderTime) >= thresholdMs
+    }
+
+    private fun isReferenceMessageContent(content: String?): Boolean {
+        val text = content ?: return false
+        return text.indexOf("<refermsg", ignoreCase = true) >= 0 ||
+                text.indexOf("<refermessage", ignoreCase = true) >= 0
+    }
+
+    private fun isClearlyNonTextMessageContent(content: String): Boolean {
+        val markers = listOf(
+            "<img",
+            "<emoji",
+            "<videomsg",
+            "<voicemsg",
+            "<location",
+            "<appmsg",
+            "<recordinfo",
+            "<msgsource"
+        )
+        return markers.any { marker ->
+            content.indexOf(marker, ignoreCase = true) >= 0
+        }
     }
 
     private fun quoteFillFromBubble(color: Int): Int {
