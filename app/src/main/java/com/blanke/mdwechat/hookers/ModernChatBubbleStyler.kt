@@ -1624,7 +1624,7 @@ object ModernChatBubbleStyler {
         XposedHelpers.setAdditionalInstanceField(msgView, keyCandidate, true)
         XposedHelpers.setAdditionalInstanceField(msgView, keyLastTextHash, textHash(msgView))
         val palette = ModernChatBubbleColors.palette(side)
-        setTextColors(msgView, palette.textColor)
+        setTextColors(msgView, palette.textColor, palette.semanticTextColor)
         setBubbleBackground(msgView, side, position, stableKey, palette)
 
         val horizontal = dp(msgView, 13f)
@@ -1638,7 +1638,7 @@ object ModernChatBubbleStyler {
         setNicknameVisibility(nicknameView, ChatBubbleStylePolicy.showNickname(position))
         tuneMessageRowHeight(itemView, msgView, avatarView, nicknameView, position)
         if (HookConfig.is_hook_chat_label_color && nicknameView != null) {
-            setTextColors(nicknameView, HookConfig.chat_label_color)
+            setTextColors(nicknameView, HookConfig.chat_label_color, HookConfig.chat_label_color)
         }
         clearPendingDecision(itemView, msgView)
     }
@@ -1922,15 +1922,17 @@ object ModernChatBubbleStyler {
         }
     }
 
-    private fun setTextColors(view: View, color: Int) {
+    private fun setTextColors(view: View, color: Int, semanticColor: Int) {
         if (view is TextView) {
             view.setTextColor(color)
-            view.setLinkTextColor(color)
+            view.setLinkTextColor(semanticColor)
             view.setHintTextColor(color)
+            SemanticTextColorizer.apply(view, semanticColor)
         }
         callColorMethod(view, "setTextColor", color)
-        callColorMethod(view, "setLinkTextColor", color)
+        callColorMethod(view, "setLinkTextColor", semanticColor)
         callColorMethod(view, "setHintTextColor", color)
+        SemanticTextColorizer.apply(view, semanticColor)
     }
 
     private fun callColorMethod(view: View, methodName: String, color: Int) {

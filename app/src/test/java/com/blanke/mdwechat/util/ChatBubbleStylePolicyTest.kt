@@ -151,9 +151,11 @@ class ChatBubbleStylePolicyTest {
 
         assertEquals(ChatBubbleStylePolicy.DEFAULT_RIGHT_BUBBLE_COLOR, right.bubbleColor)
         assertEquals(ChatBubbleStylePolicy.DEFAULT_RIGHT_TEXT_COLOR, right.textColor)
+        assertNotEquals(right.textColor, right.semanticTextColor)
         assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, right.strokeColor)
         assertEquals(0f, right.strokeWidthDp, 0f)
         assertEquals(ChatBubbleStylePolicy.DEFAULT_LEFT_BUBBLE_COLOR, left.bubbleColor)
+        assertNotEquals(left.textColor, left.semanticTextColor)
         assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, left.strokeColor)
         assertEquals(0f, left.strokeWidthDp, 0f)
     }
@@ -212,6 +214,32 @@ class ChatBubbleStylePolicyTest {
         )
 
         assertNotEquals(first.signature, second.signature)
+    }
+
+    @Test
+    fun semanticTextColorKeepsBubbleHueForBlueSenderBubble() {
+        val color = ChatBubbleStylePolicy.dynamicSemanticTextColor(0xFF0084FF.toInt())
+
+        assertTrue(blueOf(color) > redOf(color))
+        assertTrue(blueOf(color) >= greenOf(color))
+        assertTrue(luminance(color) > 180)
+    }
+
+    @Test
+    fun semanticTextColorUsesMaterialBlueForNeutralBubbles() {
+        val color = ChatBubbleStylePolicy.dynamicSemanticTextColor(0xFF222222.toInt())
+
+        assertTrue(blueOf(color) > redOf(color))
+        assertTrue(blueOf(color) > greenOf(color))
+        assertTrue(luminance(color) > 180)
+    }
+
+    @Test
+    fun semanticTextColorDarkensHueForLightWarmBubbles() {
+        val color = ChatBubbleStylePolicy.dynamicSemanticTextColor(0xFFFFE8E0.toInt())
+
+        assertTrue(redOf(color) > blueOf(color))
+        assertTrue(luminance(color) < 130)
     }
 
     @Test
@@ -420,4 +448,14 @@ class ChatBubbleStylePolicyTest {
             contentText = text
         )
     }
+
+    private fun luminance(color: Int): Int {
+        return (redOf(color) * 299 + greenOf(color) * 587 + blueOf(color) * 114) / 1000
+    }
+
+    private fun redOf(color: Int): Int = color ushr 16 and 0xFF
+
+    private fun greenOf(color: Int): Int = color ushr 8 and 0xFF
+
+    private fun blueOf(color: Int): Int = color and 0xFF
 }

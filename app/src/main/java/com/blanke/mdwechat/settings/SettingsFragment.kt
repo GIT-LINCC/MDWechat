@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Context.WINDOW_SERVICE
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Point
 import android.net.Uri
@@ -28,6 +29,7 @@ import com.blanke.mdwechat.settings.view.DownloadWechatDialog
 import com.blanke.mdwechat.util.FileUtils
 import com.blanke.mdwechat.util.LogUtil.clearFileLogs
 import com.blanke.mdwechat.util.MaterialTabCustomIconPolicy
+import com.blanke.mdwechat.util.SharedPreferencesFile
 import com.blankj.utilcode.util.FileUtils.isFileExists
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
@@ -78,6 +80,10 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         private const val LINCC_WECHAT_PAY_CODE = "f2f0YfhLFwwZNNIC7hSEL0ybtySAiJpRyqBXv5ObkrZx1iA"
     }
 
+    private val sharedPreferenceSyncListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        syncSharedPreferencesToExternal()
+    }
+
     private fun getWechatPath(): String {
         try {
             val pm = activity.packageManager
@@ -93,9 +99,10 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         takePhoto!!.onCreate(savedInstanceState)
         super.onCreate(savedInstanceState)
         EventBus.getDefault().register(this)
-        preferenceManager.sharedPreferencesMode = Context.MODE_WORLD_READABLE
+        preferenceManager.sharedPreferencesMode = Context.MODE_PRIVATE
         preferenceManager.sharedPreferencesName = Common.MOD_PREFS
         addPreferencesFromResource(R.xml.pref_settings)
+        preferenceManager.sharedPreferences.registerOnSharedPreferenceChangeListener(sharedPreferenceSyncListener)
         setLayout(preferenceScreen)
         setResolution()
 
@@ -685,6 +692,17 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         }
     }
 
+    private fun syncSharedPreferencesToExternal() {
+        thread {
+            try {
+                val sdSPFile = STATIC.sdSPFile
+                SharedPreferencesFile.write(preferenceManager.sharedPreferences, sdSPFile)
+            } catch (e: Exception) {
+                com.blanke.mdwechat.util.LogUtil.log(e)
+            }
+        }
+    }
+
     private fun copyFloatBottomConfig() {
         thread {
             FileUtils.copyAssets(activity, Common.APP_DIR_PATH, Common.CONFIG_VIEW_DIR, true)
@@ -801,6 +819,7 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
 
     override fun onDestroy() {
         super.onDestroy()
+        preferenceManager.sharedPreferences.unregisterOnSharedPreferenceChangeListener(sharedPreferenceSyncListener)
         EventBus.getDefault().unregister(this)
     }
 

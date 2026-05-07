@@ -144,7 +144,7 @@ object ModernChatBubbleRenderer {
             messageView.background = ModernBubbleDrawable(messageView.context, renderState, palette)
         }
         messageView.setPadding(dp(messageView, 13f), dp(messageView, 8.5f), dp(messageView, 13f), dp(messageView, 8.5f))
-        setTextColor(messageView, palette.textColor)
+        setTextColor(messageView, palette.textColor, palette.semanticTextColor)
         applyShadow(messageView, renderState)
         disableAncestorClipping(messageView)
 
@@ -377,7 +377,7 @@ object ModernChatBubbleRenderer {
 
         quoteContainer.background = createQuoteDrawable(quoteContainer, palette)
         quoteContainer.minimumHeight = 0
-        setTextColor(quoteText, palette.quoteTextColor)
+        setTextColor(quoteText, palette.quoteTextColor, palette.quoteTextColor)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             quoteContainer.elevation = dp(quoteContainer, 1f).toFloat()
             quoteContainer.translationZ = 0f
@@ -430,21 +430,27 @@ object ModernChatBubbleRenderer {
         }
     }
 
-    private fun setTextColor(view: View, color: Int) {
+    private fun setTextColor(view: View, color: Int, semanticColor: Int) {
         if (view is TextView) {
             if (view.currentTextColor != color) {
                 view.setTextColor(color)
-                view.setLinkTextColor(color)
                 view.setHintTextColor(color)
             }
+            view.setLinkTextColor(semanticColor)
+            SemanticTextColorizer.apply(view, semanticColor)
             return
         }
-        listOf("setTextColor", "setLinkTextColor", "setHintTextColor").forEach { method ->
+        listOf("setTextColor", "setHintTextColor").forEach { method ->
             try {
                 XposedHelpers.callMethod(view, method, color)
             } catch (_: Throwable) {
             }
         }
+        try {
+            XposedHelpers.callMethod(view, "setLinkTextColor", semanticColor)
+        } catch (_: Throwable) {
+        }
+        SemanticTextColorizer.apply(view, semanticColor)
     }
 
     private fun setAvatarVisibility(avatarView: View?, visible: Boolean) {

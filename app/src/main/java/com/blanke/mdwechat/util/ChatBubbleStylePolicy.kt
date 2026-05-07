@@ -9,6 +9,7 @@ object ChatBubbleStylePolicy {
     val DEFAULT_LEFT_QUOTE_FILL_COLOR: Int = 0xFFECEEE8.toInt()
     val DEFAULT_RIGHT_QUOTE_TEXT_COLOR: Int = 0xFF31583D.toInt()
     val DEFAULT_LEFT_QUOTE_TEXT_COLOR: Int = 0xFF666B63.toInt()
+    val DEFAULT_DYNAMIC_HUE: Float = 210f
     val TRANSPARENT_COLOR: Int = 0x00000000
 
     enum class Side {
@@ -76,6 +77,7 @@ object ChatBubbleStylePolicy {
         val bubbleColor: Int,
         val pressedBubbleColor: Int,
         val textColor: Int,
+        val semanticTextColor: Int,
         val quoteFillColor: Int,
         val quoteTextColor: Int,
         val quoteStrokeColor: Int,
@@ -83,7 +85,7 @@ object ChatBubbleStylePolicy {
         val strokeWidthDp: Float
     ) {
         val signature: String
-            get() = "$bubbleColor:$pressedBubbleColor:$textColor:$quoteFillColor:" +
+            get() = "$bubbleColor:$pressedBubbleColor:$textColor:$semanticTextColor:$quoteFillColor:" +
                     "$quoteTextColor:$quoteStrokeColor:$strokeColor:$strokeWidthDp"
     }
 
@@ -184,6 +186,7 @@ object ChatBubbleStylePolicy {
             bubbleColor = bubbleColor,
             pressedBubbleColor = scaleRgb(bubbleColor, 0.97f),
             textColor = textColor,
+            semanticTextColor = dynamicSemanticTextColor(bubbleColor),
             quoteFillColor = quoteFillColor,
             quoteTextColor = quoteTextColor,
             quoteStrokeColor = TRANSPARENT_COLOR,
@@ -350,6 +353,20 @@ object ChatBubbleStylePolicy {
         return blendRgb(color, overlay, overlayAmount)
     }
 
+    fun dynamicSemanticTextColor(backgroundColor: Int): Int {
+        val hsl = rgbToHsl(backgroundColor)
+        val isLightBackground = hsl.lightness > 0.6f
+        val isNeutral = hsl.saturation < 0.05f
+        val hue = if (isNeutral) DEFAULT_DYNAMIC_HUE else hsl.hue
+        val saturation = if (isNeutral) 0.80f else 0.85f
+        val lightness = if (isLightBackground) {
+            (hsl.lightness - 0.30f).coerceIn(0.22f, 0.40f)
+        } else {
+            (hsl.lightness + 0.30f).coerceIn(0.85f, 0.94f)
+        }
+        return hslToRgb(alphaOf(backgroundColor), hue, saturation, lightness)
+    }
+
     private fun isVisuallyDark(color: Int): Boolean {
         val red = color ushr 16 and 0xFF
         val green = color ushr 8 and 0xFF
@@ -364,6 +381,63 @@ object ChatBubbleStylePolicy {
         val blue = ((color and 0xFF) * factor).toInt().coerceIn(0, 255)
         return (alpha shl 24) or (red shl 16) or (green shl 8) or blue
     }
+
+    private data class HslColor(
+        val hue: Float,
+        val saturation: Float,
+        val lightness: Float
+    )
+
+    private fun rgbToHsl(color: Int): HslColor {
+        val red = redOf(color) / 255f
+        val green = greenOf(color) / 255f
+        val blue = blueOf(color) / 255f
+        val max = maxOf(red, green, blue)
+        val min = minOf(red, green, blue)
+        val lightness = (max + min) / 2f
+        if (max == min) {
+            return HslColor(hue = 0f, saturation = 0f, lightness = lightness)
+        }
+        val delta = max - min
+        val saturation = if (lightness > 0.5f) {
+            delta / (2f - max - min)
+        } else {
+            delta / (max + min)
+        }
+        val hue = when (max) {
+            red -> ((green - blue) / delta + if (green < blue) 6f else 0f) / 6f
+            green -> ((blue - red) / delta + 2f) / 6f
+            else -> ((red - green) / delta + 4f) / 6f
+        } * 360f
+        return HslColor(hue = hue, saturation = saturation, lightness = lightness)
+    }
+
+    private fun hslToRgb(alpha: Int, hue: Float, saturation: Float, lightness: Float): Int {
+        val normalizedHue = ((hue % 360f) + 360f) % 360f
+        val c = (1f - kotlin.math.abs(2f * lightness - 1f)) * saturation
+        val x = c * (1f - kotlin.math.abs((normalizedHue / 60f) % 2f - 1f))
+        val m = lightness - c / 2f
+        val (r1, g1, b1) = when {
+            normalizedHue < 60f -> Triple(c, x, 0f)
+            normalizedHue < 120f -> Triple(x, c, 0f)
+            normalizedHue < 180f -> Triple(0f, c, x)
+            normalizedHue < 240f -> Triple(0f, x, c)
+            normalizedHue < 300f -> Triple(x, 0f, c)
+            else -> Triple(c, 0f, x)
+        }
+        val red = java.lang.Math.round((r1 + m) * 255f).coerceIn(0, 255)
+        val green = java.lang.Math.round((g1 + m) * 255f).coerceIn(0, 255)
+        val blue = java.lang.Math.round((b1 + m) * 255f).coerceIn(0, 255)
+        return (alpha.coerceIn(0, 255) shl 24) or (red shl 16) or (green shl 8) or blue
+    }
+
+    private fun alphaOf(color: Int): Int = color ushr 24 and 0xFF
+
+    private fun redOf(color: Int): Int = color ushr 16 and 0xFF
+
+    private fun greenOf(color: Int): Int = color ushr 8 and 0xFF
+
+    private fun blueOf(color: Int): Int = color and 0xFF
 
     private fun blendRgb(base: Int, overlay: Int, overlayAmount: Float): Int {
         val amount = overlayAmount.coerceIn(0f, 1f)

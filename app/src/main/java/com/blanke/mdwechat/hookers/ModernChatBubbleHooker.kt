@@ -46,6 +46,7 @@ object ModernChatBubbleHooker : HookerProvider {
         }
         return if (enableLegacyBubbleFallbacks) {
             listOf(
+                semanticTextSpanHook,
                 textViewDrawFallbackHook,
                 viewAttachHook,
                 recyclerViewChildFallbackHook,
@@ -57,6 +58,7 @@ object ModernChatBubbleHooker : HookerProvider {
             )
         } else {
             listOf(
+                semanticTextSpanHook,
                 viewAttachHook,
                 recyclerViewAttachHook,
                 chattingItemBindHook,
@@ -64,6 +66,10 @@ object ModernChatBubbleHooker : HookerProvider {
                 recyclerViewAdapterBindHook
             )
         }
+    }
+
+    private val semanticTextSpanHook = Hooker {
+        SemanticTextColorizer.installWechatHooks(WechatGlobal.wxLoader)
     }
 
     private val textViewDrawFallbackHook = Hooker {
@@ -368,6 +374,11 @@ object ModernChatBubbleHooker : HookerProvider {
                         }
                         className.startsWith("com.tencent.mm.ui.chatting.viewitems.") -> {
                             hookChattingItemBindClass(adapterClass)
+                        }
+                        className == "com.tencent.mm.pluginsdk.ui.span.z0" ||
+                                className == "com.tencent.mm.ui.widget.MMNeat7extView" ||
+                                className == "com.tencent.neattextview.textview.view.NeatTextView" -> {
+                            SemanticTextColorizer.onWechatClassLoaded(adapterClass)
                         }
                     }
                 }

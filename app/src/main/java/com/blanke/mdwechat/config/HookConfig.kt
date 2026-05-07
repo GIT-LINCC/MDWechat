@@ -5,7 +5,6 @@ import com.blanke.mdwechat.Version
 import com.blanke.mdwechat.WeChatHelper
 import com.blanke.mdwechat.WechatGlobal
 import com.blankj.utilcode.util.BarUtils
-import com.lincc.mdwechat.BuildConfig
 
 /**
  * Created by blanke on 2017/8/25.
@@ -244,11 +243,11 @@ object HookConfig {
         }
     val is_key_hide_tab: Boolean
         get() {
-            return WeChatHelper.XMOD_PREFS.getBoolean(key_hide_tab, true)
+            return WeChatHelper.XMOD_PREFS.getBoolean(key_hide_tab, false)
         }
     val is_hook_tab_bg: Boolean
         get() {
-            return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_tab_bg, true)
+            return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_tab_bg, false)
         }
     val is_chat_bg_transparent_mode: Boolean
         get() {
@@ -260,7 +259,7 @@ object HookConfig {
         }
     val is_hook_bg_immersion: Boolean by lazy {
         val version = WechatGlobal.wxVersion!! >= Version("7.0.10")
-        version && is_hook_tab_bg && WeChatHelper.XMOD_PREFS.getBoolean(key_hook_bg_immersion, true)
+        version && is_hook_tab_bg && WeChatHelper.XMOD_PREFS.getBoolean(key_hook_bg_immersion, false)
     }
 
     val is_enable_bg_chat: Boolean
@@ -341,7 +340,7 @@ object HookConfig {
         }
     val is_hook_bubble_tint: Boolean
         get() {
-            return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_bubble_tint, false)
+            return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_bubble_tint, true)
         }
     val is_hook_menu_qrcode: Boolean
         get() {
@@ -418,7 +417,7 @@ object HookConfig {
         }
     val get_hook_bubble_tint_right: Int
         get() {
-            return WeChatHelper.XMOD_PREFS.getInt(key_hook_bubble_tint_right, Color.WHITE)
+            return WeChatHelper.XMOD_PREFS.getInt(key_hook_bubble_tint_right, Color.parseColor("#03A9F4"))
         }
     val get_hook_chat_text_color_left: Int
         get() {
@@ -434,7 +433,7 @@ object HookConfig {
         }
     val is_hook_log: Boolean
         get() {
-            return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_log, BuildConfig.DEBUG)
+            return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_log, false)
         }
     val is_hook_log_xposed: Boolean
         get() {

@@ -9,6 +9,7 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 
 object LogHooker : HookerProvider {
+    private val inLogHook = ThreadLocal<Boolean>()
 
     override fun provideStaticHookers(): List<Hooker>? {
         return listOf(LogEHooker)
@@ -18,12 +19,18 @@ object LogHooker : HookerProvider {
     private val LogIHooker = Hooker {
         XposedBridge.hookAllMethods(Log::class.java, "i", object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
+                if (inLogHook.get() == true) return
                 if (!HookConfig.is_hook_log) {
                     return
                 }
-                val msg = param.args[1] as String
-                if (msg.contains("mdwechat", true)) {
-                    exportLog(msg)
+                inLogHook.set(true)
+                try {
+                    val msg = param.args.getOrNull(1)?.toString() ?: return
+                    if (msg.contains("mdwechat", true)) {
+                        exportLog(msg)
+                    }
+                } finally {
+                    inLogHook.set(false)
                 }
             }
         })
@@ -32,19 +39,25 @@ object LogHooker : HookerProvider {
     private val LogEHooker = Hooker {
         XposedBridge.hookAllMethods(Log::class.java, "e", object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
+                if (inLogHook.get() == true) return
                 if (!HookConfig.is_hook_log) {
                     return
                 }
-                val msg = param.args[1] as String
-                if (msg.contains("mdwechat", true)) {
-                    exportLog(msg)
-                }
-                val tr = param.args[param.args.size - 1]
-                if (tr is Throwable) {
-                    val msg1 = Log.getStackTraceString(tr)
-                    if (msg1.contains("mdwechat", true)) {
-                        exportLog(msg1)
+                inLogHook.set(true)
+                try {
+                    val msg = param.args.getOrNull(1)?.toString().orEmpty()
+                    if (msg.contains("mdwechat", true)) {
+                        exportLog(msg)
                     }
+                    val tr = param.args.lastOrNull()
+                    if (tr is Throwable) {
+                        val msg1 = Log.getStackTraceString(tr)
+                        if (msg1.contains("mdwechat", true)) {
+                            exportLog(msg1)
+                        }
+                    }
+                } finally {
+                    inLogHook.set(false)
                 }
             }
         })

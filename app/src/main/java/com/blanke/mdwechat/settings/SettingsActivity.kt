@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.preference.PreferenceManager
 import android.provider.Settings
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -24,7 +25,7 @@ import com.blanke.mdwechat.settings.api.APIManager
 import com.blanke.mdwechat.settings.bean.NewestVersionConfig
 import com.blanke.mdwechat.util.FileUtils
 import com.blanke.mdwechat.util.LogUtil
-import com.blankj.utilcode.util.ToastUtils
+import com.blanke.mdwechat.util.SharedPreferencesFile
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.lincc.mdwechat.R
@@ -62,10 +63,24 @@ class SettingsActivity : Activity() {
 
     private fun touchSharedPreferencesForLSPosed() {
         try {
-            val pref = getSharedPreferences(Common.MOD_PREFS, Context.MODE_WORLD_READABLE)
-            val hookSwitch = pref.getBoolean("hookSwitch", true)
-            pref.edit().putBoolean("hookSwitch", hookSwitch).apply()
-        } catch (ignored: SecurityException) {
+            PreferenceManager.setDefaultValues(this, Common.MOD_PREFS, Context.MODE_PRIVATE, R.xml.pref_settings, false)
+        } catch (ignored: Exception) {
+        }
+        try {
+            val pref = getSharedPreferences(Common.MOD_PREFS, Context.MODE_PRIVATE)
+            val editor = pref.edit()
+            if (!pref.contains("hookSwitch")) editor.putBoolean("hookSwitch", true)
+            if (!pref.contains("key_hide_tab")) editor.putBoolean("key_hide_tab", false)
+            if (!pref.contains("key_hook_tab")) editor.putBoolean("key_hook_tab", true)
+            if (!pref.contains("key_hook_tab_bg")) editor.putBoolean("key_hook_tab_bg", false)
+            if (!pref.contains("key_hook_bg_immersion")) editor.putBoolean("key_hook_bg_immersion", false)
+            if (!pref.contains("key_hook_bubble_tint")) editor.putBoolean("key_hook_bubble_tint", true)
+            if (!pref.contains("key_hook_bubble_tint_left")) editor.putInt("key_hook_bubble_tint_left", -1)
+            if (!pref.contains("key_hook_bubble_tint_right")) editor.putInt("key_hook_bubble_tint_right", -16537100)
+            if (!pref.contains("key_hook_log")) editor.putBoolean("key_hook_log", false)
+            if (!pref.contains("key_hook_log_xposed")) editor.putBoolean("key_hook_log_xposed", false)
+            editor.commit()
+        } catch (ignored: Exception) {
         }
     }
 
@@ -73,17 +88,31 @@ class SettingsActivity : Activity() {
         APIManager().getNewestVersion(
                 object : Callback {
                     override fun onFailure(call: Call?, e: IOException?) {
-                        ToastUtils.showLong("获取最新版本失败," + e?.message)
+                        LogUtil.log("获取最新版本失败," + e?.message)
                     }
 
                     override fun onResponse(call: Call?, response: Response) {
-                        val data = Gson().fromJson<NewestVersionConfig>(response.body()?.string(), object : TypeToken<NewestVersionConfig>() {}.type)
-
-                        val ignoreVersion = getSharedPreferences("newestVersion", Context.MODE_PRIVATE).getInt("ignoredVersion", 0)
-                        if (data.versionCode.toInt() > versionCode && ignoreVersion < versionCode) {
-                            context.runOnUiThread {
-                                showNewestVersion(context, data)
+                        try {
+                            if (!response.isSuccessful) {
+                                LogUtil.log("获取最新版本失败, HTTP ${response.code()}")
+                                return
                             }
+                            val body = response.body()?.string()
+                            if (body.isNullOrBlank()) {
+                                LogUtil.log("获取最新版本失败, empty body")
+                                return
+                            }
+                            val data = Gson().fromJson<NewestVersionConfig>(body, object : TypeToken<NewestVersionConfig>() {}.type)
+                                    ?: return
+                            val remoteVersionCode = data.versionCode.toIntOrNull() ?: return
+                            val ignoreVersion = getSharedPreferences("newestVersion", Context.MODE_PRIVATE).getInt("ignoredVersion", 0)
+                            if (remoteVersionCode > versionCode && ignoreVersion < versionCode) {
+                                context.runOnUiThread {
+                                    showNewestVersion(context, data)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            LogUtil.log(e)
                         }
                     }
                 }
@@ -136,14 +165,27 @@ class SettingsActivity : Activity() {
         val sdSPFile = File(AppCustomConfig.getConfigFile(Common.MOD_PREFS + ".xml"))
         SettingsFragment.STATIC.sharedPrefsFile = sharedPrefsFile
         SettingsFragment.STATIC.sdSPFile = sdSPFile
-        if (sharedPrefsFile.exists()) {
-            val outStream = FileOutputStream(sdSPFile)
-            FileUtils.copyFile(FileInputStream(sharedPrefsFile), outStream)
-        } else if (sdSPFile.exists()) { // restore sharedPrefsFile
-            sharedPrefsFile.parentFile.mkdirs()
-            val input = FileInputStream(sdSPFile)
-            val outStream = FileOutputStream(sharedPrefsFile)
-            FileUtils.copyFile(input, outStream)
+        try {
+            val prefs = getSharedPreferences(Common.MOD_PREFS, Context.MODE_PRIVATE)
+            if (prefs.all.isNotEmpty()) {
+                SharedPreferencesFile.write(prefs, sdSPFile)
+            } else if (sharedPrefsFile.exists()) {
+                sdSPFile.parentFile?.mkdirs()
+                FileOutputStream(sdSPFile).use { outStream ->
+                    FileInputStream(sharedPrefsFile).use { input ->
+                        FileUtils.copyFile(input, outStream)
+                    }
+                }
+            } else if (sdSPFile.exists()) {
+                sharedPrefsFile.parentFile?.mkdirs()
+                FileInputStream(sdSPFile).use { input ->
+                    FileOutputStream(sharedPrefsFile).use { outStream ->
+                        FileUtils.copyFile(input, outStream)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            LogUtil.log(e)
         }
     }
 
@@ -157,10 +199,14 @@ class SettingsActivity : Activity() {
 
     private fun copyConfig() {
         thread {
-            FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.CONFIG_WECHAT_DIR)
-            FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.CONFIG_VIEW_DIR)
-            FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.HELP_DIR)
-            FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.ICON_DIR)
+            try {
+                FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.CONFIG_WECHAT_DIR)
+                FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.CONFIG_VIEW_DIR)
+                FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.HELP_DIR)
+                FileUtils.copyAssets(this, Common.APP_DIR_PATH, Common.ICON_DIR)
+            } catch (e: Exception) {
+                LogUtil.log(e)
+            }
             copySharedPrefences()
             Handler(Looper.getMainLooper()).post {
                 showSettingsFragment()
@@ -197,7 +243,7 @@ class SettingsActivity : Activity() {
                 copyConfig()
             } else {
                 Toast.makeText(this, R.string.msg_permission_fail, Toast.LENGTH_LONG).show()
-                finish()
+                copyConfig()
             }
         }
     }

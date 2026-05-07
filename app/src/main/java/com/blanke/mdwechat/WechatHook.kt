@@ -11,7 +11,6 @@ import com.blanke.mdwechat.hookers.base.HookerProvider
 import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.LogUtil.log
 import com.blanke.mdwechat.util.RuntimeProbe
-import com.blanke.mdwechat.util.FileUtils
 import com.blanke.mdwechat.util.ModuleContextCompat
 import com.blanke.mdwechat.util.waitInvoke
 import com.lincc.mdwechat.BuildConfig
@@ -20,13 +19,14 @@ import de.robv.android.xposed.IXposedHookZygoteInit
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import de.robv.android.xposed.XposedBridge
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
 
 class WechatHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
     private fun debugLine(msg: String) {
-        val stamp = SimpleDateFormat("HH:mm:ss").format(Date())
-        FileUtils.write(AppCustomConfig.getLogFile("hook_debug"), "$stamp $msg\n", true)
+        if (!EARLY_DEBUG_LOG) return
+        try {
+            XposedBridge.log("MDWechatModule: $msg")
+        } catch (_: Throwable) {
+        }
     }
 
     override fun initZygote(startupParam: IXposedHookZygoteInit.StartupParam?) {
@@ -82,7 +82,9 @@ class WechatHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
 //            hookers.forEach {
 //                log(it::class.java.name)
 //            }
-            LogUtil.logStackTraces()
+            if (HookConfig.is_hook_debug || HookConfig.is_hook_debug2) {
+                LogUtil.logStackTraces()
+            }
 //            //endregion
 
             if ((!isVXPEnv) && (HookConfig.is_hook_debug || HookConfig.is_hook_debug2)) {
@@ -193,5 +195,8 @@ class WechatHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
         }
         log("模块加载成功")
     }
-}
 
+    companion object {
+        private const val EARLY_DEBUG_LOG = false
+    }
+}

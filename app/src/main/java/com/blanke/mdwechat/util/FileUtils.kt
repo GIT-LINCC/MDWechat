@@ -1,7 +1,6 @@
 package com.blanke.mdwechat.util
 
 import android.content.Context
-import de.robv.android.xposed.XposedBridge
 import java.io.*
 
 /**
@@ -77,14 +76,13 @@ object FileUtils {
             writer = FileWriter(fileName, append)
             writer.write(content)
         } catch (e: IOException) {
-            XposedBridge.log(e)
+            return
         } finally {
             try {
                 if (writer != null) {
                     writer.close()
                 }
             } catch (e: IOException) {
-                XposedBridge.log(e)
             }
         }
     }
