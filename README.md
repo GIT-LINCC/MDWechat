@@ -15,14 +15,8 @@ Fork 自 [Blankeer/MDWechat](https://github.com/Blankeer/MDWechat)，当前维�
 5. 构建环境升级到 `AGP 7.1.2 + Gradle 7.5 + Kotlin 1.6.21`，命令行构建需要 `Java 11+`。
 
 # 效果预览
-![gif_demo](image/demo.gif)
-![main00](image/main00.png)
-![chat00](image/chat00.png)
-![main01](image/main01.png)
-![main02](image/main02.png)
-![main03](image/main03.png)
-![main05](image/main05.png)
-![chat01](image/chat01.png)
+![MD3v1.0 动态预览](image/md3v1-preview.gif)
+![文件传输助手聊天气泡预览](image/md3v1-file-transfer.png)
 
 # 功能
 实现的功能有:
