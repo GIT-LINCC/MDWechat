@@ -60,6 +60,7 @@ class WechatHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
                     LauncherUIHooker,
                     AvatarHooker,
                     ListViewHooker,
+                    ModernChatBubbleHooker,
                     ConversationHooker,
                     ContactHooker,
                     DiscoverHooker,

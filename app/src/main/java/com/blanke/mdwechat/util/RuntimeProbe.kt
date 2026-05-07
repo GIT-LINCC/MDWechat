@@ -1,6 +1,7 @@
 package com.blanke.mdwechat.util
 
 import android.content.Context
+import android.os.Environment
 import de.robv.android.xposed.XposedBridge
 import java.io.File
 import java.text.SimpleDateFormat
@@ -21,10 +22,54 @@ object RuntimeProbe {
     }
 
     fun append(context: Context?, message: String) {
+        append(context, FILE_NAME, message)
+    }
+
+    fun append(context: Context?, fileName: String, message: String) {
         context ?: return
         try {
             val time = SimpleDateFormat("HH:mm:ss.SSS", Locale.ROOT).format(Date())
-            FileUtils.write(getProbeFile(context).absolutePath, "$time $message\n", true)
+            val line = "$time $message\n"
+            val file = if (fileName == FILE_NAME) {
+                getProbeFile(context)
+            } else {
+                val probeDir = File(context.filesDir, DIR_NAME)
+                if (!probeDir.exists()) {
+                    probeDir.mkdirs()
+                }
+                File(probeDir, fileName)
+            }
+            FileUtils.write(file.absolutePath, line, true)
+            writeExternal(fileName, line)
+            writeAppExternal(context, fileName, line)
+        } catch (t: Throwable) {
+            XposedBridge.log(t)
+        }
+    }
+
+    private fun writeExternal(fileName: String, line: String) {
+        try {
+            val logDir = File(
+                Environment.getExternalStorageDirectory(),
+                DIR_NAME + File.separator + "logs"
+            )
+            if (!logDir.exists()) {
+                logDir.mkdirs()
+            }
+            FileUtils.write(File(logDir, fileName).absolutePath, line, true)
+        } catch (t: Throwable) {
+            XposedBridge.log(t)
+        }
+    }
+
+    private fun writeAppExternal(context: Context, fileName: String, line: String) {
+        try {
+            val baseDir = context.getExternalFilesDir(null) ?: return
+            val logDir = File(baseDir, DIR_NAME + File.separator + "logs")
+            if (!logDir.exists()) {
+                logDir.mkdirs()
+            }
+            FileUtils.write(File(logDir, fileName).absolutePath, line, true)
         } catch (t: Throwable) {
             XposedBridge.log(t)
         }

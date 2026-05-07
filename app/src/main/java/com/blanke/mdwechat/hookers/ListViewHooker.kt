@@ -19,6 +19,7 @@ import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.hookers.base.Hooker
 import com.blanke.mdwechat.hookers.base.HookerProvider
 import com.blanke.mdwechat.hookers.main.BackgroundImageHook
+import com.blanke.mdwechat.util.ChatBubbleStylePolicy
 import com.blanke.mdwechat.util.ContactPageStyleResolver
 import com.blanke.mdwechat.util.ColorUtils
 import com.blanke.mdwechat.util.ConversationRipplePolicy
@@ -794,11 +795,11 @@ object ListViewHooker : HookerProvider {
                                 XposedHelpers.callMethod(msgView, "setHintTextColor", chatMsgRightTextColor)
 //                    val mText = XposedHelpers.getObjectField(msgView, "mText")
 //                    log("msg right text=$mText")
-                                val bubble = WeChatHelper.getRightBubble(msgView.resources)
-                                msgView.background = bubble
-                                if (WechatGlobal.wxVersion!! >= Version("6.7.2")) {
-                                    msgView.setPadding(30, 25, 45, 25)
-                                }
+                                ModernChatBubbleStyler.applyLegacyTextMessage(
+                                        view,
+                                        msgView,
+                                        ChatBubbleStylePolicy.Side.RIGHT
+                                )
                             }
                         }
                     } else if (ViewTreeUtils.equals(VTTV.ChatLeftMessageItem.item, view)) {
@@ -830,12 +831,11 @@ object ListViewHooker : HookerProvider {
                                 XposedHelpers.callMethod(msgView, "setTextColor", chatMsgLeftTextColor)
                                 XposedHelpers.callMethod(msgView, "setLinkTextColor", chatMsgLeftTextColor)
                                 XposedHelpers.callMethod(msgView, "setHintTextColor", chatMsgLeftTextColor)
-                                // 聊天气泡
-                                val bubble = WeChatHelper.getLeftBubble(msgView.resources)
-                                msgView.background = bubble
-                                if (WechatGlobal.wxVersion!! >= Version("6.7.2")) {
-                                    msgView.setPadding(45, 25, 30, 25)
-                                }
+                                ModernChatBubbleStyler.applyLegacyTextMessage(
+                                        view,
+                                        msgView,
+                                        ChatBubbleStylePolicy.Side.LEFT
+                                )
                             }
                         }
                     }
