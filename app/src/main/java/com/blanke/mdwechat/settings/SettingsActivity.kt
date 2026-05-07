@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -50,7 +51,7 @@ class SettingsActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
         Common.APP_DIR_PATH
-        touchSharedPreferencesForLSPosed()
+        prepareSharedPreferencesForHooks()
         verifyStoragePermissions(this)
         fab = findViewById(R.id.fab)
         fab.setOnClickListener {
@@ -61,13 +62,28 @@ class SettingsActivity : Activity() {
         GetNewestVersion(this, getVersionCode())
     }
 
-    private fun touchSharedPreferencesForLSPosed() {
+    private fun prepareSharedPreferencesForHooks() {
+        val sharedPrefsDir = File(filesDir, "../shared_prefs")
+        val sharedPrefsFile = File(sharedPrefsDir, Common.MOD_PREFS + ".xml")
+        val sdSPFile = File(AppCustomConfig.getConfigFile(Common.MOD_PREFS + ".xml"))
+        SettingsFragment.STATIC.sharedPrefsFile = sharedPrefsFile
+        SettingsFragment.STATIC.sdSPFile = sdSPFile
         try {
-            PreferenceManager.setDefaultValues(this, Common.MOD_PREFS, Context.MODE_PRIVATE, R.xml.pref_settings, false)
+            val shouldImportExternal = sdSPFile.exists() &&
+                    (!sharedPrefsFile.exists() || sdSPFile.lastModified() >= sharedPrefsFile.lastModified())
+            if (shouldImportExternal) {
+                sharedPrefsFile.parentFile?.mkdirs()
+                FileInputStream(sdSPFile).use { input ->
+                    FileOutputStream(sharedPrefsFile, false).use { output ->
+                        FileUtils.copyFile(input, output)
+                    }
+                }
+            }
         } catch (ignored: Exception) {
         }
+        applyDefaultHookPreferences()
+        val pref = openHookSharedPreferences()
         try {
-            val pref = getSharedPreferences(Common.MOD_PREFS, Context.MODE_PRIVATE)
             val editor = pref.edit()
             if (!pref.contains("hookSwitch")) editor.putBoolean("hookSwitch", true)
             if (!pref.contains("key_hide_tab")) editor.putBoolean("key_hide_tab", false)
@@ -81,6 +97,42 @@ class SettingsActivity : Activity() {
             if (!pref.contains("key_hook_log_xposed")) editor.putBoolean("key_hook_log_xposed", false)
             editor.commit()
         } catch (ignored: Exception) {
+        }
+        exportSharedPreferences(pref, sdSPFile)
+    }
+
+    private fun applyDefaultHookPreferences() {
+        try {
+            PreferenceManager.setDefaultValues(
+                    this,
+                    Common.MOD_PREFS,
+                    Context.MODE_WORLD_READABLE,
+                    R.xml.pref_settings,
+                    false
+            )
+            return
+        } catch (ignored: SecurityException) {
+        } catch (ignored: IllegalArgumentException) {
+        }
+        try {
+            PreferenceManager.setDefaultValues(
+                    this,
+                    Common.MOD_PREFS,
+                    Context.MODE_PRIVATE,
+                    R.xml.pref_settings,
+                    false
+            )
+        } catch (ignored: Exception) {
+        }
+    }
+
+    private fun openHookSharedPreferences(): SharedPreferences {
+        return try {
+            getSharedPreferences(Common.MOD_PREFS, Context.MODE_WORLD_READABLE)
+        } catch (ignored: SecurityException) {
+            getSharedPreferences(Common.MOD_PREFS, Context.MODE_PRIVATE)
+        } catch (ignored: IllegalArgumentException) {
+            getSharedPreferences(Common.MOD_PREFS, Context.MODE_PRIVATE)
         }
     }
 
@@ -160,30 +212,15 @@ class SettingsActivity : Activity() {
     }
 
     private fun copySharedPrefences() {
-        val sharedPrefsDir = File(filesDir, "../shared_prefs")
-        val sharedPrefsFile = File(sharedPrefsDir, Common.MOD_PREFS + ".xml")
-        val sdSPFile = File(AppCustomConfig.getConfigFile(Common.MOD_PREFS + ".xml"))
-        SettingsFragment.STATIC.sharedPrefsFile = sharedPrefsFile
-        SettingsFragment.STATIC.sdSPFile = sdSPFile
+        prepareSharedPreferencesForHooks()
+    }
+
+    private fun exportSharedPreferences(
+            prefs: SharedPreferences,
+            sdSPFile: File
+    ) {
         try {
-            val prefs = getSharedPreferences(Common.MOD_PREFS, Context.MODE_PRIVATE)
-            if (prefs.all.isNotEmpty()) {
-                SharedPreferencesFile.write(prefs, sdSPFile)
-            } else if (sharedPrefsFile.exists()) {
-                sdSPFile.parentFile?.mkdirs()
-                FileOutputStream(sdSPFile).use { outStream ->
-                    FileInputStream(sharedPrefsFile).use { input ->
-                        FileUtils.copyFile(input, outStream)
-                    }
-                }
-            } else if (sdSPFile.exists()) {
-                sharedPrefsFile.parentFile?.mkdirs()
-                FileInputStream(sdSPFile).use { input ->
-                    FileOutputStream(sharedPrefsFile).use { outStream ->
-                        FileUtils.copyFile(input, outStream)
-                    }
-                }
-            }
+            SharedPreferencesFile.write(prefs, sdSPFile)
         } catch (e: Exception) {
             LogUtil.log(e)
         }

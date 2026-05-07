@@ -99,9 +99,17 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         takePhoto!!.onCreate(savedInstanceState)
         super.onCreate(savedInstanceState)
         EventBus.getDefault().register(this)
-        preferenceManager.sharedPreferencesMode = Context.MODE_PRIVATE
+        preferenceManager.sharedPreferencesMode = Context.MODE_WORLD_READABLE
         preferenceManager.sharedPreferencesName = Common.MOD_PREFS
-        addPreferencesFromResource(R.xml.pref_settings)
+        try {
+            addPreferencesFromResource(R.xml.pref_settings)
+        } catch (ignored: SecurityException) {
+            preferenceManager.sharedPreferencesMode = Context.MODE_PRIVATE
+            addPreferencesFromResource(R.xml.pref_settings)
+        } catch (ignored: IllegalArgumentException) {
+            preferenceManager.sharedPreferencesMode = Context.MODE_PRIVATE
+            addPreferencesFromResource(R.xml.pref_settings)
+        }
         preferenceManager.sharedPreferences.registerOnSharedPreferenceChangeListener(sharedPreferenceSyncListener)
         setLayout(preferenceScreen)
         setResolution()

@@ -8,7 +8,6 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.StateListDrawable
-import android.net.Uri
 import com.blanke.mdwechat.config.AppCustomConfig
 import com.blanke.mdwechat.config.HookConfig
 import com.blanke.mdwechat.util.ColorUtils
@@ -17,15 +16,10 @@ import com.blanke.mdwechat.util.NightModeUtils
 import com.blanke.mdwechat.util.NightModeUtils.colorPrimary
 import com.blanke.mdwechat.util.RippleColorResolver
 import de.robv.android.xposed.XSharedPreferences
-import de.robv.android.xposed.XposedHelpers
 import java.io.File
-import java.io.FileOutputStream
 
 object WeChatHelper {
     lateinit var XMOD_PREFS: XSharedPreferences
-    private const val prefsProviderAuthority = "com.lincc.mdwechat.prefs"
-    private val providerPrefsFileName = Common.MOD_PREFS + ".xml"
-    private var providerPrefsFile: File? = null
 
     //微信8.0.0第四页底色
     val wechatWhite: Int = Color.parseColor("#ffffff")
@@ -178,19 +172,11 @@ object WeChatHelper {
     }
 
     fun initPrefs() {
-        val providerFile = refreshProviderPrefsFile()
-        val providerPrefs = providerFile?.let { XSharedPreferences(it) }
-        val externalPrefsFile = File(AppCustomConfig.getConfigFile(Common.MOD_PREFS + ".xml"))
-        val externalPrefs = XSharedPreferences(externalPrefsFile)
         val packagePrefs = XSharedPreferences(Common.MY_APPLICATION_PACKAGE, Common.MOD_PREFS)
-        XMOD_PREFS = if (providerFile?.canRead() == true && providerPrefs != null) {
-            providerPrefs
-        } else if (externalPrefsFile.canRead()) {
-            externalPrefs
-        } else if (packagePrefs.file?.canRead() == true) {
+        XMOD_PREFS = if (packagePrefs.file?.canRead() == true) {
             packagePrefs
         } else {
-            externalPrefs
+            XSharedPreferences(File(AppCustomConfig.getConfigFile(Common.MOD_PREFS + ".xml")))
         }
         try {
             XMOD_PREFS.makeWorldReadable()
@@ -203,34 +189,7 @@ object WeChatHelper {
     }
 
     fun reloadPrefs() {
-        refreshProviderPrefsFile()
         XMOD_PREFS.reload()
-    }
-
-    private fun refreshProviderPrefsFile(): File? {
-        return try {
-            val systemContext = getSystemContext()
-            val appInfo = systemContext.packageManager.getApplicationInfo(Common.WECHAT_PACKAGENAME, 0)
-            val target = File(File(appInfo.dataDir, "cache/mdwechat"), providerPrefsFileName)
-            target.parentFile?.mkdirs()
-            val uri = Uri.parse("content://$prefsProviderAuthority/$providerPrefsFileName")
-            systemContext.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(target, false).use { output ->
-                    input.copyTo(output)
-                }
-            } ?: return providerPrefsFile
-            providerPrefsFile = target
-            if (target.length() > 0L) target else null
-        } catch (_: Throwable) {
-            providerPrefsFile
-        }
-    }
-
-    private fun getSystemContext(): Context {
-        val activityThread = XposedHelpers.callStaticMethod(
-                XposedHelpers.findClass("android.app.ActivityThread", null),
-                "currentActivityThread")
-        return XposedHelpers.callMethod(activityThread, "getSystemContext") as Context
     }
 
     private fun getDarkColor(color: Int): Int {
