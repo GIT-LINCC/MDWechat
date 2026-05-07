@@ -16,7 +16,7 @@ import android.view.*
 import android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
-import com.joshcai.mdwechat.R
+import com.lincc.mdwechat.R
 
 
 class MaterialSearchView @JvmOverloads constructor(private val mContext: Context, attrs: AttributeSet? = null, defStyle: Int = -1) : FrameLayout(mContext, attrs, defStyle), View.OnClickListener {

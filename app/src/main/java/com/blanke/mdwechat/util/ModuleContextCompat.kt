@@ -104,13 +104,13 @@ object ModuleContextCompat {
 
     private fun resolveModuleApkPathFromClassLoader(): String? {
         val commonUrl = Common::class.java.getResource("Common.class")?.toString()
-        val buildConfigUrl = Common::class.java.getResource("/com/joshcai/mdwechat/BuildConfig.class")?.toString()
+        val buildConfigUrl = Common::class.java.getResource("/com/lincc/mdwechat/BuildConfig.class")?.toString()
         lastModulePathProbe = "commonUrl=$commonUrl | buildConfigUrl=$buildConfigUrl"
         extractApkPathFromResourceUrl(Common::class.java.getResource("Common.class")?.toString())?.let {
             lastModulePathProbe = "resourceCommon=$it"
             return it
         }
-        extractApkPathFromResourceUrl(Common::class.java.getResource("/com/joshcai/mdwechat/BuildConfig.class")?.toString())?.let {
+        extractApkPathFromResourceUrl(Common::class.java.getResource("/com/lincc/mdwechat/BuildConfig.class")?.toString())?.let {
             lastModulePathProbe = "resourceBuildConfig=$it"
             return it
         }

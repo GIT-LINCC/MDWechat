@@ -27,7 +27,7 @@ import com.blanke.mdwechat.util.LogUtil
 import com.blankj.utilcode.util.ToastUtils
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
-import com.joshcai.mdwechat.R
+import com.lincc.mdwechat.R
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Response

@@ -32,7 +32,7 @@ import com.blanke.mdwechat.util.ViewUtils
 import com.blanke.mdwechat.util.mainThread
 import com.blanke.mdwechat.widget.MaterialTabItem
 import com.blanke.mdwechat.widget.MdMaterialTabLayout
-import com.joshcai.mdwechat.R
+import com.lincc.mdwechat.R
 import com.google.android.material.tabs.TabLayout
 import de.robv.android.xposed.XposedHelpers
 

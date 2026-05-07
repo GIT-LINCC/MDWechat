@@ -21,13 +21,13 @@
     <string name="summary_alipay_red_packet">每天可领 可用于支付宝捐赠或实体店消费</string>
     <string name="text_donate">向原作者 (Blanke) 捐赠</string>
     <string name="text_donate_lincc">向维护者 (Lincc) 捐赠</string>
-    <string name="text_donate_joshcai">向上一个维护者 (JoshCai) 捐赠</string>
+    <string name="text_donate_previous_maintainer">向上一个维护者 (JoshCai) 捐赠</string>
     <string name="key_donate">key_donate</string>
     <string name="key_donate_wechat">key_donate_wechat</string>
     <string name="key_donate_lincc">key_donate_lincc</string>
     <string name="key_donate_wechat_lincc">key_donate_wechat_lincc</string>
-    <string name="key_donate_joshcai">key_donate_joshcai</string>
-    <string name="key_donate_wechat_joshcai">key_donate_wechat_joshcai</string>
+    <string name="key_donate_previous_maintainer">key_donate_previous_maintainer</string>
+    <string name="key_donate_wechat_previous_maintainer">key_donate_wechat_previous_maintainer</string>
     <string name="text_donate_alipay">捐赠(支付宝)</string>
     <string name="text_donate_wechat">捐赠(微信)</string>
     <string name="text_category_settings">设置</string>
@@ -220,8 +220,8 @@
     <string name="key_feedback_email_blanke">key_feedback_email_blanke</string>
     <string name="text_feedback_email_blanke">原作者 (blanke) 的邮箱</string>
     <string name="text_feedback_email_blanke_info">blanke.master+mdwechat@gmail.com</string>
-    <string name="key_feedback_email_josh_cai">key_feedback_email_josh_cai</string>
-    <string name="text_feedback_email_josh_cai">Lincc 的邮箱</string>
+    <string name="key_feedback_email_lincc">key_feedback_email_lincc</string>
+    <string name="text_feedback_email_lincc">Lincc 的邮箱</string>
     <string name="key_github_screen">key_github_screen</string>
     <string name="text_github_screen">项目地址</string>
     <string name="text_github_screen_info">可以给个star嘛</string>
@@ -229,10 +229,10 @@
     <string name="text_github">Github</string>
     <string name="key_github_blanke">key_github_blanke</string>
     <string name="text_github_blanke">原作者 (Blanke) 的 GitHub地址</string>
-    <string name="key_gitee_joshcai">key_gitee_joshcai</string>
-    <string name="text_gitee_joshcai">上一个维护者 (JoshCai) 的 Gitee 地址</string>
-    <string name="key_github_joshcai">key_github_joshcai</string>
-    <string name="text_github_joshcai">本项目的 GitHub 地址</string>
+    <string name="key_gitee_legacy">key_gitee_legacy</string>
+    <string name="text_gitee_legacy">历史 Gitee 镜像地址</string>
+    <string name="key_github_lincc">key_github_lincc</string>
+    <string name="text_github_lincc">本项目的 GitHub 地址</string>
     <string name="key_hook_hide_wx_tab_2">key_hook_hide_wx_tab_2</string>
     <string name="text_hook_hide_wx_tab_2">隐藏发现页面</string>
     <string name="key_hook_hide_wx_tab_3">key_hook_hide_wx_tab_3</string>
@@ -407,9 +407,9 @@
     <string name="test">试验</string>
     <string name="latest_wechat_version">8.0.49</string>
     <string name="app_name_version">version MD3v1.0</string>
-    <string name="key_joshcai_info">key_joshcai_info</string>
-    <string name="josh_cai_info_outdated">检测到不兼容的微信版本（当前版本%1$s，最高适配%2$s)</string>
-    <string name="josh_cai_info_outdated_suffix">\n当前版本主要围绕微信 8.0.49 调整。微信版本不一致时，界面资源名或消息列表结构可能不同，部分功能可能不生效。\n\n请在微信用户条款和当地法律允许的范围内使用。本软件造成的一切后果由使用者自行承担，如有疑问请先停用或卸载。</string>
-    <string name="josh_cai_info">\n适配微信 %1$s (当前微信版本:%2$s)\n如果微信版本与适配版本不同，部分界面可能需要重新适配。\n\nMD3v1.0 当前状态:\n- 主界面切换到 Material 3 风格底部标签、悬浮按钮和页面背景\n- 优化会话列表、通讯录、发现、我等页面的 Ripple、高亮和背景表现\n- 重构聊天气泡渲染，支持连续消息智能分组、头像/昵称对齐、引用消息和自定义颜色\n- 改善进入会话和滚动时的表现，减少原始气泡闪现与明显卡顿</string>
-    <string name="josh_cai_info2">\t\t\t\tHello 我是 Lincc。本项目基于 Blankeer@github 开源的 MDWechat 继续维护，并在已有工作的基础上适配较新的微信版本。\n\t\t\t\t应用内保留了向原作者 Blanke 和后续维护者 JoshCai 的捐赠方式；如果你喜欢本项目，也欢迎支持当前维护者。</string>
+    <string name="key_lincc_info">key_lincc_info</string>
+    <string name="lincc_info_outdated">检测到不兼容的微信版本（当前版本%1$s，最高适配%2$s)</string>
+    <string name="lincc_info_outdated_suffix">\n当前版本主要围绕微信 8.0.49 调整。微信版本不一致时，界面资源名或消息列表结构可能不同，部分功能可能不生效。\n\n请在微信用户条款和当地法律允许的范围内使用。本软件造成的一切后果由使用者自行承担，如有疑问请先停用或卸载。</string>
+    <string name="lincc_info">\n适配微信 %1$s (当前微信版本:%2$s)\n如果微信版本与适配版本不同，部分界面可能需要重新适配。\n\nMD3v1.0 当前状态:\n- 主界面切换到 Material 3 风格底部标签、悬浮按钮和页面背景\n- 优化会话列表、通讯录、发现、我等页面的 Ripple、高亮和背景表现\n- 重构聊天气泡渲染，支持连续消息智能分组、头像/昵称对齐、引用消息和自定义颜色\n- 改善进入会话和滚动时的表现，减少原始气泡闪现与明显卡顿</string>
+    <string name="lincc_info2">\t\t\t\tHello 我是 Lincc。本项目基于 Blankeer@github 开源的 MDWechat 继续维护，并在已有工作的基础上适配较新的微信版本。\n\t\t\t\t应用内保留了向原作者 Blanke 和后续维护者 JoshCai 的捐赠方式；如果你喜欢本项目，也欢迎支持当前维护者。</string>
 </resources>

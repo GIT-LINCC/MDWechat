@@ -32,8 +32,8 @@ import com.blankj.utilcode.util.FileUtils.isFileExists
 import com.blankj.utilcode.util.TimeUtils
 import com.blankj.utilcode.util.ToastUtils
 import com.jaredrummler.android.colorpicker.ColorPreference
-import com.joshcai.mdwechat.BuildConfig
-import com.joshcai.mdwechat.R
+import com.lincc.mdwechat.BuildConfig
+import com.lincc.mdwechat.R
 import net.dongliu.apk.parser.ApkFile
 import org.devio.takephoto.app.TakePhoto
 import org.devio.takephoto.app.TakePhoto.TakeResultListener
@@ -72,7 +72,7 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         private const val PROJECT_GITHUB_URL = "https://github.com/GIT-LINCC/MDWechat"
         private const val PROJECT_GITHUB_ISSUES_URL = "https://github.com/GIT-LINCC/MDWechat/issues"
         private const val PROJECT_GITHUB_RELEASES_URL = "https://github.com/GIT-LINCC/MDWechat/releases"
-        private const val PROJECT_GITEE_URL = "https://gitee.com/JoshCai/MDWechat"
+        private const val LEGACY_GITEE_URL = "https://gitee.com/JoshCai/MDWechat"
         private const val LINCC_EMAIL = "lcc.spiritualism@gmail.com"
         private const val LINCC_ALIPAY_URL = "https://qr.alipay.com/fkx15957bug79deqbnpvm5b"
         private const val LINCC_WECHAT_PAY_CODE = "f2f0YfhLFwwZNNIC7hSEL0ybtySAiJpRyqBXv5ObkrZx1iA"
@@ -158,24 +158,24 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
         findPreference(getString(R.string.key_donate_wechat))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_donate_lincc))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_donate_wechat_lincc))?.onPreferenceClickListener = this
-        findPreference(getString(R.string.key_donate_joshcai))?.onPreferenceClickListener = this
-        findPreference(getString(R.string.key_donate_wechat_joshcai))?.onPreferenceClickListener = this
+        findPreference(getString(R.string.key_donate_previous_maintainer))?.onPreferenceClickListener = this
+        findPreference(getString(R.string.key_donate_wechat_previous_maintainer))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_feedback))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_reset_wechat_config))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_reset_config))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_reset_float_bottom_config))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_reset_icon_config))?.onPreferenceClickListener = this
 //        findPreference(getString(R.string.key_feedback_email_blanke))?.onPreferenceClickListener = this
-        findPreference(getString(R.string.key_feedback_email_josh_cai))?.onPreferenceClickListener = this
+        findPreference(getString(R.string.key_feedback_email_lincc))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_feedback_gitee))?.onPreferenceClickListener = this
-        findPreference(getString(R.string.key_gitee_joshcai))?.onPreferenceClickListener = this
+        findPreference(getString(R.string.key_gitee_legacy))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_github_blanke))?.onPreferenceClickListener = this
-        findPreference(getString(R.string.key_github_joshcai))?.onPreferenceClickListener = this
+        findPreference(getString(R.string.key_github_lincc))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_hook_conversation_bg))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_generate_wechat_config))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_download_wechat_config))?.onPreferenceClickListener = this
 
-        findPreference(getString(R.string.key_joshcai_info))?.onPreferenceClickListener = this
+        findPreference(getString(R.string.key_lincc_info))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_attention))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_releases))?.onPreferenceClickListener = this
         findPreference(getString(R.string.key_start_use))?.onPreferenceClickListener = this
@@ -224,13 +224,13 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
 
     private fun setWechatVersionWarning() {
         if (wxVersion > Version(getString(R.string.latest_wechat_version))) {
-            findPreference(getString(R.string.key_joshcai_info))?.apply {
+            findPreference(getString(R.string.key_lincc_info))?.apply {
                 this.layoutResource = R.layout.preference_warning
-                this.summary = String.format("${getString(R.string.josh_cai_info_outdated)}\n${getString(R.string.josh_cai_info_outdated_suffix)}", wxVersion, getString(R.string.latest_wechat_version))
+                this.summary = String.format("${getString(R.string.lincc_info_outdated)}\n${getString(R.string.lincc_info_outdated_suffix)}", wxVersion, getString(R.string.latest_wechat_version))
             }
         } else {
-            findPreference(getString(R.string.key_joshcai_info))?.apply {
-                this.summary = String.format(getString(R.string.josh_cai_info), getString(R.string.latest_wechat_version), wxVersion)
+            findPreference(getString(R.string.key_lincc_info))?.apply {
+                this.summary = String.format(getString(R.string.lincc_info), getString(R.string.latest_wechat_version), wxVersion)
             }
         }
     }
@@ -567,7 +567,7 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
 
     override fun onPreferenceClick(preference: Preference): Boolean {
         when (preference.key) {
-            getString(R.string.key_joshcai_info) -> myTest()
+            getString(R.string.key_lincc_info) -> myTest()
 
             "key_clear_logs" -> _clearLogs()
             getString(R.string.key_alipay_red_packet) -> donate("https://qr.alipay.com/cpx030345hsmmzm2j44ro47")
@@ -575,18 +575,18 @@ class SettingsFragment : PreferenceFragment(), TakeResultListener, InvokeListene
             getString(R.string.key_donate_wechat) -> donateWechat("f2f0YjlNObKWk7zwpDQoGtBDBe-Cper5cndi")
             getString(R.string.key_donate_lincc) -> donate(LINCC_ALIPAY_URL)
             getString(R.string.key_donate_wechat_lincc) -> donateWechat(LINCC_WECHAT_PAY_CODE)
-            getString(R.string.key_donate_joshcai) -> donate("https://qr.alipay.com/fkx12707x8vvnh6mjpqseb4")
-            getString(R.string.key_donate_wechat_joshcai) -> donateWechat("f2f0xQLV4IlGwE3CHY7LelHelT0Uqklc-n9W")
+            getString(R.string.key_donate_previous_maintainer) -> donate("https://qr.alipay.com/fkx12707x8vvnh6mjpqseb4")
+            getString(R.string.key_donate_wechat_previous_maintainer) -> donateWechat("f2f0xQLV4IlGwE3CHY7LelHelT0Uqklc-n9W")
             getString(R.string.key_feedback) -> feedback()
             getString(R.string.key_reset_wechat_config) -> copyWechatConfig()
             getString(R.string.key_reset_config) -> deleteConfig()
             getString(R.string.key_reset_float_bottom_config) -> copyFloatBottomConfig()
             getString(R.string.key_reset_icon_config) -> resetIcons()
 //            getString(R.string.key_feedback_email_blanke) -> sendEmail()
-            getString(R.string.key_feedback_email_josh_cai) -> sendEmail(LINCC_EMAIL)
+            getString(R.string.key_feedback_email_lincc) -> sendEmail(LINCC_EMAIL)
             getString(R.string.key_feedback_gitee) -> gotoWebsite(PROJECT_GITHUB_ISSUES_URL)
-            getString(R.string.key_gitee_joshcai) -> gotoWebsite(PROJECT_GITEE_URL)
-            getString(R.string.key_github_joshcai) -> gotoWebsite(PROJECT_GITHUB_URL)
+            getString(R.string.key_gitee_legacy) -> gotoWebsite(LEGACY_GITEE_URL)
+            getString(R.string.key_github_lincc) -> gotoWebsite(PROJECT_GITHUB_URL)
             getString(R.string.key_github_blanke) -> gotoWebsite("https://github.com/Blankeer/MDWechat")
             getString(R.string.key_generate_wechat_config) -> generateWechatFile()
             getString(R.string.key_download_wechat_config) -> downloadWechatConfig()

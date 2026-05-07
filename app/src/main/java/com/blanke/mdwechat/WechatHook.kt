@@ -14,7 +14,7 @@ import com.blanke.mdwechat.util.RuntimeProbe
 import com.blanke.mdwechat.util.FileUtils
 import com.blanke.mdwechat.util.ModuleContextCompat
 import com.blanke.mdwechat.util.waitInvoke
-import com.joshcai.mdwechat.BuildConfig
+import com.lincc.mdwechat.BuildConfig
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.IXposedHookZygoteInit
 import de.robv.android.xposed.callbacks.XC_LoadPackage

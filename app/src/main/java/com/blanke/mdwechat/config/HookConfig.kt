@@ -5,7 +5,7 @@ import com.blanke.mdwechat.Version
 import com.blanke.mdwechat.WeChatHelper
 import com.blanke.mdwechat.WechatGlobal
 import com.blankj.utilcode.util.BarUtils
-import com.joshcai.mdwechat.BuildConfig
+import com.lincc.mdwechat.BuildConfig
 
 /**
  * Created by blanke on 2017/8/25.

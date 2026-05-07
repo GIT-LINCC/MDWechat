@@ -239,7 +239,7 @@ object AppCustomConfig {
     fun writePicPositionConfig() {
         val json = gson.toJson(picPositionConfig) +
                 "\n//提示：此文件自动生成，用于保存沉浸背景的图片位置信息。\n" +
-                "//Created by JoshCai"
+                "//Created by Lincc"
         val op = getViewConfigFile(Common.FILE_NAME_PIC_POSITION)
         val succ = FileIOUtils.writeFileFromString(op, json)
         LogUtil.log("记录图片位置信息至文件:" + succ)

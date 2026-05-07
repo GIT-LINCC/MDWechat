@@ -26,7 +26,7 @@ import com.blanke.mdwechat.util.RuntimeProbe
 import com.github.clans.fab.FloatingActionButton
 import com.github.clans.fab.FloatingActionButton.SIZE_MINI
 import com.github.clans.fab.FloatingActionMenu
-import com.joshcai.mdwechat.R
+import com.lincc.mdwechat.R
 import de.robv.android.xposed.XposedHelpers
 
 

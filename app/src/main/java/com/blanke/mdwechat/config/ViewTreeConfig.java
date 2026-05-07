@@ -5,7 +5,7 @@ import com.blanke.mdwechat.ViewTreeRepo;
 
 import java.lang.reflect.Method;
 
-//Created by JoshCai.
+//Maintained by Lincc.
 //usage:
 //        1. add Method
 //        2. add getter

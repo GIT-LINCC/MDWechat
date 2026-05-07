@@ -39,7 +39,7 @@ public class FloatingActionMenu extends ViewGroup {
     private static final int ANIMATION_DURATION = 300;
     private static final float CLOSED_PLUS_ROTATION = 0f;
 
-    // changed by JoshCai
+    // changed by Lincc
     public static float OPENED_PLUS_ROTATION_LEFT = -135f;
     private static final float OPENED_PLUS_ROTATION_RIGHT = 90f + 45f;
 

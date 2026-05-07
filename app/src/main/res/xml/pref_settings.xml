@@ -14,7 +14,7 @@
 
     <!--关于-->
     <Preference
-        android:key="@string/key_joshcai_info"
+        android:key="@string/key_lincc_info"
         android:layout="@layout/preference_info"
         android:title="@string/app_name_version" />
     <!--帮助和教程-->
@@ -37,7 +37,7 @@
         android:title="@string/text_about_settings">
         <Preference
             android:layout="@layout/preference_info"
-            android:summary="@string/josh_cai_info2" />
+            android:summary="@string/lincc_info2" />
 
         <!--捐赠-->
         <Preference
@@ -66,12 +66,12 @@
         </PreferenceScreen>
         <PreferenceScreen
             android:summary="@string/summary_donate"
-            android:title="@string/text_donate_joshcai">
+            android:title="@string/text_donate_previous_maintainer">
             <Preference
-                android:key="@string/key_donate_joshcai"
+                android:key="@string/key_donate_previous_maintainer"
                 android:title="@string/text_donate_alipay" />
             <Preference
-                android:key="@string/key_donate_wechat_joshcai"
+                android:key="@string/key_donate_wechat_previous_maintainer"
                 android:title="@string/text_donate_wechat" />
         </PreferenceScreen>
 
@@ -85,8 +85,8 @@
             android:summary="@string/text_feedback_email_info"
             android:title="@string/text_feedback_email">
             <Preference
-                android:key="@string/key_feedback_email_josh_cai"
-                android:title="@string/text_feedback_email_josh_cai" />
+                android:key="@string/key_feedback_email_lincc"
+                android:title="@string/text_feedback_email_lincc" />
             <!--                    <Preference-->
             <!--                        android:key="@string/key_feedback_email_blanke"-->
             <!--                        android:summary="@string/text_feedback_email_blanke_info"-->
@@ -103,16 +103,16 @@
             android:title="@string/text_github_screen">
             <PreferenceCategory android:title="@string/text_github">
                 <Preference
-                    android:key="@string/key_github_joshcai"
-                    android:title="@string/text_github_joshcai" />
+                    android:key="@string/key_github_lincc"
+                    android:title="@string/text_github_lincc" />
                 <Preference
                     android:key="@string/key_github_blanke"
                     android:title="@string/text_github_blanke" />
             </PreferenceCategory>
             <PreferenceCategory android:title="@string/text_gitee">
                 <Preference
-                    android:key="@string/key_gitee_joshcai"
-                    android:title="@string/text_gitee_joshcai" />
+                    android:key="@string/key_gitee_legacy"
+                    android:title="@string/text_gitee_legacy" />
             </PreferenceCategory>
 
         </PreferenceScreen>
