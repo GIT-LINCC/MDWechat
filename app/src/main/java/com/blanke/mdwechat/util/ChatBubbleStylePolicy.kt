@@ -311,6 +311,12 @@ object ChatBubbleStylePolicy {
         return true
     }
 
+    fun isStylableWechatBubbleMessage(type: Int?, content: String?): Boolean {
+        return isTextLikeWechatMessage(type, content) ||
+                isVoiceWechatMessage(type, content) ||
+                isCallWechatMessage(type, content)
+    }
+
     private fun isTimeSplit(
         older: MessageRow?,
         newer: MessageRow?,
@@ -325,6 +331,23 @@ object ChatBubbleStylePolicy {
         val text = content ?: return false
         return text.indexOf("<refermsg", ignoreCase = true) >= 0 ||
                 text.indexOf("<refermessage", ignoreCase = true) >= 0
+    }
+
+    private fun isVoiceWechatMessage(type: Int?, content: String?): Boolean {
+        if (type == 34) {
+            return true
+        }
+        return content?.indexOf("<voicemsg", ignoreCase = true) ?: -1 >= 0
+    }
+
+    private fun isCallWechatMessage(type: Int?, content: String?): Boolean {
+        if (type == 50) {
+            return true
+        }
+        val text = content ?: return false
+        return text.indexOf("通话时长", ignoreCase = true) >= 0 ||
+                text.indexOf("已在其它设备拒绝", ignoreCase = true) >= 0 ||
+                text.indexOf("<voip", ignoreCase = true) >= 0
     }
 
     private fun isClearlyNonTextMessageContent(content: String): Boolean {

@@ -2925,7 +2925,7 @@ object ModernChatBubbleStyler {
             }
             val normalizedContent = normalizeMessageContent(content)
             return RowMeta(
-                isTextMessage = ChatBubbleStylePolicy.isTextLikeWechatMessage(type, content),
+                isTextMessage = ChatBubbleStylePolicy.isStylableWechatBubbleMessage(type, content),
                 side = side,
                 senderKey = senderKey,
                 createTimeMs = createTime,

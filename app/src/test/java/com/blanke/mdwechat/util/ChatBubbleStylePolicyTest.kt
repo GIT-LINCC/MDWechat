@@ -415,6 +415,27 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
+    fun voiceAndCallRowsAreStylableBubbleMessages() {
+        assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(34, "<msg><voicemsg /></msg>"))
+        assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(50, "通话时长 01:48"))
+        assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(1, "plain text"))
+        assertFalse(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(3, "<msg><img aeskey=\"x\" /></msg>"))
+    }
+
+    @Test
+    fun voiceRowsParticipateInMessageGrouping() {
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(
+                row("voice1", ChatBubbleStylePolicy.Side.LEFT, "alice", 1_000L, "4\"", isTextMessage = true),
+                row("voice2", ChatBubbleStylePolicy.Side.LEFT, "alice", 2_000L, "14\"", isTextMessage = true)
+            )
+        )
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("voice1").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("voice2").position)
+    }
+
+    @Test
     fun renderStatesCarryVisualContractForNativePainter() {
         val rows = listOf(
             row("1", ChatBubbleStylePolicy.Side.LEFT, "alice", 1_000L, "a"),
