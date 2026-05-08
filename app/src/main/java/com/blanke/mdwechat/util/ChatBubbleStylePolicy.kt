@@ -11,6 +11,33 @@ object ChatBubbleStylePolicy {
     val DEFAULT_LEFT_QUOTE_TEXT_COLOR: Int = 0xFF666B63.toInt()
     val DEFAULT_DYNAMIC_HUE: Float = 210f
     val TRANSPARENT_COLOR: Int = 0x00000000
+    private val richCardMessageTypes = setOf(
+        42,
+        49,
+        419430449,
+        436207665,
+        469762097
+    )
+    private val richAppMsgTypes = setOf(
+        3,
+        5,
+        6,
+        10,
+        13,
+        19,
+        24,
+        33,
+        36,
+        40,
+        44,
+        46,
+        51,
+        57,
+        2000,
+        2001,
+        2002
+    )
+    private val unsupportedAppMsgTypes = setOf(2, 4, 8)
 
     enum class Side {
         LEFT,
@@ -195,6 +222,21 @@ object ChatBubbleStylePolicy {
         )
     }
 
+    fun cardPalette(): BubblePalette {
+        val bubbleColor = 0xFFFFFFFF.toInt()
+        return BubblePalette(
+            bubbleColor = bubbleColor,
+            pressedBubbleColor = scaleRgb(bubbleColor, 0.97f),
+            textColor = DEFAULT_LEFT_TEXT_COLOR,
+            semanticTextColor = dynamicSemanticTextColor(bubbleColor),
+            quoteFillColor = DEFAULT_LEFT_QUOTE_FILL_COLOR,
+            quoteTextColor = DEFAULT_LEFT_QUOTE_TEXT_COLOR,
+            quoteStrokeColor = TRANSPARENT_COLOR,
+            strokeColor = TRANSPARENT_COLOR,
+            strokeWidthDp = 0f
+        )
+    }
+
     fun shouldUpdateCachedPositionForNeighborGrowth(
         side: Side,
         cachedPosition: GroupPosition,
@@ -313,8 +355,11 @@ object ChatBubbleStylePolicy {
 
     fun isStylableWechatBubbleMessage(type: Int?, content: String?): Boolean {
         return isTextLikeWechatMessage(type, content) ||
+                isImageWechatMessage(type, content) ||
+                isLocationWechatMessage(type, content) ||
                 isVoiceWechatMessage(type, content) ||
-                isCallWechatMessage(type, content)
+                isCallWechatMessage(type, content) ||
+                isRichCardWechatMessage(type, content)
     }
 
     private fun isTimeSplit(
@@ -340,6 +385,20 @@ object ChatBubbleStylePolicy {
         return content?.indexOf("<voicemsg", ignoreCase = true) ?: -1 >= 0
     }
 
+    private fun isImageWechatMessage(type: Int?, content: String?): Boolean {
+        if (type == 3) {
+            return true
+        }
+        return content?.indexOf("<img", ignoreCase = true) ?: -1 >= 0
+    }
+
+    private fun isLocationWechatMessage(type: Int?, content: String?): Boolean {
+        if (type == 48) {
+            return true
+        }
+        return content?.indexOf("<location", ignoreCase = true) ?: -1 >= 0
+    }
+
     private fun isCallWechatMessage(type: Int?, content: String?): Boolean {
         if (type == 50) {
             return true
@@ -348,6 +407,60 @@ object ChatBubbleStylePolicy {
         return text.indexOf("通话时长", ignoreCase = true) >= 0 ||
                 text.indexOf("已在其它设备拒绝", ignoreCase = true) >= 0 ||
                 text.indexOf("<voip", ignoreCase = true) >= 0
+    }
+
+    private fun isRichCardWechatMessage(type: Int?, content: String?): Boolean {
+        if (type in richCardMessageTypes && content.isNullOrBlank()) {
+            return true
+        }
+        val text = content ?: return false
+        if (hasAnyMarker(
+                text,
+                "<wcpayinfo",
+                "<paymsg",
+                "微信转账",
+                "微信红包",
+                "<nativeurl",
+                "<templateid>"
+            )
+        ) {
+            return true
+        }
+        if (type == 42 || hasAnyMarker(text, "<msg username=", "<msg bigheadimgurl=", "<nickname>")) {
+            return true
+        }
+        if (text.indexOf("<appmsg", ignoreCase = true) < 0) {
+            return type in richCardMessageTypes
+        }
+        val appMsgType = extractAppMsgType(text)
+        if (appMsgType != null) {
+            if (appMsgType in unsupportedAppMsgTypes) {
+                return false
+            }
+            return appMsgType in richAppMsgTypes || type in richCardMessageTypes
+        }
+        return type in richCardMessageTypes
+    }
+
+    private fun extractAppMsgType(content: String): Int? {
+        val startTag = "<type>"
+        val endTag = "</type>"
+        val start = content.indexOf(startTag, ignoreCase = true)
+        if (start < 0) {
+            return null
+        }
+        val valueStart = start + startTag.length
+        val end = content.indexOf(endTag, valueStart, ignoreCase = true)
+        if (end <= valueStart) {
+            return null
+        }
+        return content.substring(valueStart, end).trim().toIntOrNull()
+    }
+
+    private fun hasAnyMarker(content: String, vararg markers: String): Boolean {
+        return markers.any { marker ->
+            content.indexOf(marker, ignoreCase = true) >= 0
+        }
     }
 
     private fun isClearlyNonTextMessageContent(content: String): Boolean {

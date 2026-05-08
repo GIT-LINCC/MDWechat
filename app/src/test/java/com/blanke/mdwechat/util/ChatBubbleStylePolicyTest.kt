@@ -197,6 +197,16 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
+    fun richCardPaletteUsesNeutralCardSurface() {
+        val palette = ChatBubbleStylePolicy.cardPalette()
+
+        assertEquals(0xFFFFFFFF.toInt(), palette.bubbleColor)
+        assertEquals(ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR, palette.textColor)
+        assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, palette.strokeColor)
+        assertEquals(0f, palette.strokeWidthDp, 0f)
+    }
+
+    @Test
     fun paletteSignatureChangesWhenCustomColorsChange() {
         val first = ChatBubbleStylePolicy.bubblePalette(
             ChatBubbleStylePolicy.Side.RIGHT,
@@ -419,7 +429,84 @@ class ChatBubbleStylePolicyTest {
         assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(34, "<msg><voicemsg /></msg>"))
         assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(50, "通话时长 01:48"))
         assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(1, "plain text"))
-        assertFalse(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(3, "<msg><img aeskey=\"x\" /></msg>"))
+        assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(3, "<msg><img aeskey=\"x\" /></msg>"))
+        assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(48, "<msg><location /></msg>"))
+    }
+
+    @Test
+    fun richCardRowsAreStylableBubbleMessages() {
+        assertTrue(
+            ChatBubbleStylePolicy.isStylableWechatBubbleMessage(
+                49,
+                "<msg><appmsg><type>5</type><title>link</title></appmsg></msg>"
+            )
+        )
+        assertTrue(
+            ChatBubbleStylePolicy.isStylableWechatBubbleMessage(
+                49,
+                "<msg><appmsg><type>33</type><title>mini program</title></appmsg></msg>"
+            )
+        )
+        assertTrue(
+            ChatBubbleStylePolicy.isStylableWechatBubbleMessage(
+                42,
+                "<msg username=\"wxid_demo\"><nickname>card</nickname></msg>"
+            )
+        )
+        assertTrue(
+            ChatBubbleStylePolicy.isStylableWechatBubbleMessage(
+                419430449,
+                "<msg><appmsg><type>2000</type><wcpayinfo /></appmsg></msg>"
+            )
+        )
+        assertTrue(
+            ChatBubbleStylePolicy.isStylableWechatBubbleMessage(
+                436207665,
+                "<msg><appmsg><type>2001</type><title>微信红包</title></appmsg></msg>"
+            )
+        )
+        assertTrue(
+            ChatBubbleStylePolicy.isStylableWechatBubbleMessage(
+                3,
+                "<msg><img aeskey=\"x\" /></msg>"
+            )
+        )
+        assertFalse(
+            ChatBubbleStylePolicy.isStylableWechatBubbleMessage(
+                43,
+                "<msg><videomsg /></msg>"
+            )
+        )
+    }
+
+    @Test
+    fun richCardRowsParticipateInMessageGrouping() {
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(
+                row("link", ChatBubbleStylePolicy.Side.LEFT, "alice", 1_000L, "link", isTextMessage = true),
+                row("text", ChatBubbleStylePolicy.Side.LEFT, "alice", 2_000L, "ok", isTextMessage = true),
+                row("transfer", ChatBubbleStylePolicy.Side.LEFT, "alice", 3_000L, "transfer", isTextMessage = true)
+            )
+        )
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("link").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.MIDDLE, states.getValue("text").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("transfer").position)
+    }
+
+    @Test
+    fun mediaRowsParticipateInMessageGrouping() {
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(
+                row("image", ChatBubbleStylePolicy.Side.LEFT, "alice", 1_000L, "[image]", isTextMessage = true),
+                row("location", ChatBubbleStylePolicy.Side.LEFT, "alice", 2_000L, "[location]", isTextMessage = true),
+                row("text", ChatBubbleStylePolicy.Side.LEFT, "alice", 3_000L, "ok", isTextMessage = true)
+            )
+        )
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("image").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.MIDDLE, states.getValue("location").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("text").position)
     }
 
     @Test

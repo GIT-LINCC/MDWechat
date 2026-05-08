@@ -3,16 +3,23 @@ package com.blanke.mdwechat.hookers
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.blanke.mdwechat.ViewTreeRepoThisVersion as VTTV
+import com.blanke.mdwechat.bean.ViewTree
 import com.blanke.mdwechat.util.ChatBubbleStylePolicy
 import com.blanke.mdwechat.util.RuntimeProbe
+import com.blanke.mdwechat.util.ViewTreeUtils
+import com.blanke.mdwechat.util.ViewUtils
 import de.robv.android.xposed.XposedHelpers
 import java.util.Collections
 import java.util.WeakHashMap
@@ -36,6 +43,7 @@ object ModernChatBubbleRenderer {
     private const val keyPendingAppendRefresh = "mdwechat_native_bubble_pending_append_refresh"
     private const val probeFile = "native_bubble_renderer.txt"
     private const val enableRendererProbe = false
+    private const val enableGenericRichCardHeuristic = false
     private val appendRefreshDelaysMs = longArrayOf(80L, 220L, 520L, 900L)
     private val probeKeys = mutableSetOf<String>()
     private val timeTextPattern = Regex("^\\d{1,2}:\\d{2}$")
@@ -47,7 +55,21 @@ object ModernChatBubbleRenderer {
         val kind: String,
         val applyTextPadding: Boolean,
         val layoutView: View = bubbleView,
-        val clearViews: List<View> = emptyList()
+        val clearViews: List<View> = emptyList(),
+        val signatureText: String? = null,
+        val clipToOutline: Boolean = false
+    )
+
+    private data class RichCardMetrics(
+        val textCount: Int,
+        val imageCount: Int,
+        val textSample: String
+    )
+
+    private data class RichCardCandidate(
+        val view: View,
+        val metrics: RichCardMetrics,
+        val score: Int
     )
 
     fun applyFromAdapterBind(adapter: Any, position: Int, itemView: View): Boolean {
@@ -124,7 +146,7 @@ object ModernChatBubbleRenderer {
             return false
         }
         val renderState = applyVisibleBoundaries(itemView, state)
-        val palette = ModernChatBubbleColors.palette(renderState.side)
+        val palette = paletteForTarget(target, renderState)
         val signature = renderSignature(renderState, text, palette)
         if (isCurrentRender(itemView, bubbleView, renderState, signature)) {
             syncReusableState(itemView, target, renderState)
@@ -133,6 +155,7 @@ object ModernChatBubbleRenderer {
             return true
         }
         clearOriginalBubbleContainers(bubbleView)
+        clearCardForeground(target)
         target.clearViews.forEach { clearViewLayer(it) }
         val existingBubble = bubbleView.background as? ModernBubbleDrawable
         val canUpdateExisting = existingBubble != null &&
@@ -163,6 +186,7 @@ object ModernChatBubbleRenderer {
         }
         setBubbleTextColors(target, palette.textColor, palette.semanticTextColor)
         applyShadow(bubbleView, renderState)
+        applyContentClipIfNeeded(bubbleView, target)
         disableAncestorClipping(bubbleView)
 
         val layoutView = target.layoutView
@@ -354,6 +378,15 @@ object ModernChatBubbleRenderer {
         }
     }
 
+    private fun clearCardForeground(target: BubbleTarget) {
+        if (target.applyTextPadding || target.kind == "voice" || target.kind == "call") {
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            target.bubbleView.foreground = null
+        }
+    }
+
     private fun normalizeRow(itemView: View, messageView: View, state: ChatBubbleStylePolicy.RenderState) {
         val row = findViewByResourceName(itemView, "bkj")
         forceTopGravity(row)
@@ -437,12 +470,36 @@ object ModernChatBubbleRenderer {
         view.elevation = dp(view, 4.5f).toFloat()
         view.translationZ = dp(view, 0.5f).toFloat()
         view.outlineProvider = object : ViewOutlineProvider() {
+            private val outlinePath = Path()
+            private val outlineRect = RectF()
+
             override fun getOutline(target: View, outline: Outline) {
                 if (target.width <= 0 || target.height <= 0) {
                     return
                 }
-                val radius = if (state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE) 24f else 20f
-                outline.setRoundRect(0, 0, target.width, target.height, dp(target, radius).toFloat())
+                outlineRect.set(0f, 0f, target.width.toFloat(), target.height.toFloat())
+                outlinePath.reset()
+                outlinePath.addRoundRect(
+                    outlineRect,
+                    floatArrayOf(
+                        dp(target, state.cornerRadii.topLeft).toFloat(),
+                        dp(target, state.cornerRadii.topLeft).toFloat(),
+                        dp(target, state.cornerRadii.topRight).toFloat(),
+                        dp(target, state.cornerRadii.topRight).toFloat(),
+                        dp(target, state.cornerRadii.bottomRight).toFloat(),
+                        dp(target, state.cornerRadii.bottomRight).toFloat(),
+                        dp(target, state.cornerRadii.bottomLeft).toFloat(),
+                        dp(target, state.cornerRadii.bottomLeft).toFloat()
+                    ),
+                    Path.Direction.CW
+                )
+                try {
+                    @Suppress("DEPRECATION")
+                    outline.setConvexPath(outlinePath)
+                } catch (_: Throwable) {
+                    val radius = if (state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE) 24f else 20f
+                    outline.setRoundRect(0, 0, target.width, target.height, dp(target, radius).toFloat())
+                }
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -489,6 +546,7 @@ object ModernChatBubbleRenderer {
     }
 
     private fun renderTextForSignature(target: BubbleTarget): String? {
+        target.signatureText?.takeIf { it.isNotBlank() }?.let { return it }
         renderedText(target.textView)?.takeIf { it.isNotBlank() }?.let { return it }
         renderedText(target.bubbleView)?.takeIf { it.isNotBlank() }?.let { return it }
         target.bubbleView.contentDescription
@@ -540,15 +598,25 @@ object ModernChatBubbleRenderer {
     }
 
     private fun findBubbleTarget(itemView: View): BubbleTarget? {
+        findKnownRichBubbleTarget(itemView)?.let { return it }
+        findResourceSignalCardTarget(itemView)?.let { return it }
         findCallBubbleTarget(itemView)?.let { return it }
         findVoiceBubbleTarget(itemView)?.let { return it }
-        val messageView = findViewByResourceName(itemView, resourceMessage) ?: return null
-        return BubbleTarget(
-            bubbleView = messageView,
-            textView = messageView,
-            kind = "text",
-            applyTextPadding = true
-        )
+        val messageView = findViewByResourceName(itemView, resourceMessage)
+        if (messageView != null) {
+            return BubbleTarget(
+                bubbleView = messageView,
+                textView = messageView,
+                kind = "text",
+                applyTextPadding = true
+            )
+        }
+        findImageBubbleTargetByStructure(itemView)?.let { return it }
+        return if (enableGenericRichCardHeuristic) {
+            findRichCardBubbleTarget(itemView)
+        } else {
+            null
+        }
     }
 
     private fun findVoiceBubbleTarget(itemView: View): BubbleTarget? {
@@ -579,7 +647,12 @@ object ModernChatBubbleRenderer {
         val callBubble = findViewByResourceName(itemView, resourceCallBubble) ?: return null
         val textView = findViewByResourceName(callBubble, resourceCallText)
             ?: findViewByResourceName(itemView, resourceCallText)
-        if (textView == null && renderedText(callBubble).isNullOrBlank()) {
+        val text = renderedText(textView) ?: renderedText(callBubble)
+        val hasCallSignal = text?.contains("通话") == true ||
+                text?.contains("接听") == true ||
+                text?.contains("拒绝") == true ||
+                text?.contains("已取消") == true
+        if (textView == null || !hasCallSignal) {
             return null
         }
         return BubbleTarget(
@@ -588,6 +661,520 @@ object ModernChatBubbleRenderer {
             kind = "call",
             applyTextPadding = false
         )
+    }
+
+    private fun findKnownRichBubbleTarget(itemView: View): BubbleTarget? {
+        knownRichSpecs.forEach { spec ->
+            val target = spec.resolve(itemView)
+            if (target != null) {
+                return target
+            }
+        }
+        return null
+    }
+
+    private val knownRichSpecs: List<KnownRichSpec> by lazy {
+        listOf(
+            KnownRichSpec(
+                tree = VTTV.ChatLeftContactCardItem,
+                targetKey = "bgView",
+                kind = "contact-card"
+            ),
+            KnownRichSpec(
+                tree = VTTV.ChatRightContactCardItem,
+                targetKey = "bgView",
+                kind = "contact-card"
+            ),
+            KnownRichSpec(
+                tree = VTTV.ChatLeftPositionItem,
+                targetKey = "bgView",
+                kind = "position",
+                clipToOutline = true
+            ),
+            KnownRichSpec(
+                tree = VTTV.ChatRightPositionItem,
+                targetKey = "bgView",
+                kind = "position",
+                clipToOutline = true
+            ),
+            KnownRichSpec(
+                tree = VTTV.ChatLeftSharingItem,
+                targetKey = "miniProgramBgView",
+                kind = "mini-program",
+                clearKeys = listOf("miniProgramBgView_bgView"),
+                clearKeysRoot = ClearKeysRoot.TARGET,
+                clipToOutline = true
+            ),
+            KnownRichSpec(
+                tree = VTTV.ChatRightSharingItem,
+                targetKey = "miniProgramBgView",
+                kind = "mini-program",
+                clearKeys = listOf("miniProgramBgView_bgView"),
+                clearKeysRoot = ClearKeysRoot.TARGET,
+                clipToOutline = true
+            ),
+            KnownRichSpec(
+                tree = VTTV.ChatLeftRedPacketItem,
+                targetKey = "bgView",
+                kind = "redpacket",
+                clearKeys = listOf("adsView"),
+                clipToOutline = true
+            ),
+            KnownRichSpec(
+                tree = VTTV.ChatRightRedPacketItem,
+                targetKey = "bgView",
+                kind = "redpacket",
+                clearKeys = listOf("adsView"),
+                clipToOutline = true
+            ),
+            KnownRichSpec(
+                tree = VTTV.ChatLeftPictureItem,
+                targetPath = intArrayOf(4, 1, 1),
+                kind = "image",
+                clipToOutline = true
+            ),
+            KnownRichSpec(
+                tree = VTTV.ChatRightPictureItem,
+                targetPath = intArrayOf(4, 1, 1, 0),
+                kind = "image",
+                clipToOutline = true
+            )
+        )
+    }
+
+    private enum class ClearKeysRoot {
+        ITEM,
+        TARGET
+    }
+
+    private data class KnownRichSpec(
+        val tree: ViewTree,
+        val targetKey: String? = null,
+        val targetPath: IntArray? = null,
+        val kind: String,
+        val clearKeys: List<String> = emptyList(),
+        val clearKeysRoot: ClearKeysRoot = ClearKeysRoot.ITEM,
+        val clipToOutline: Boolean = false
+    ) {
+        fun resolve(itemView: View): BubbleTarget? {
+            if (!ViewTreeUtils.equals(tree.item, itemView)) {
+                return null
+            }
+            val target = when {
+                targetPath != null -> ViewUtils.getChildView1(itemView, targetPath)
+                targetKey != null -> ViewUtils.getChildView1(itemView, tree.treeStacks[targetKey])
+                else -> null
+            } ?: return null
+            val clearViews = clearKeys.mapNotNull { key ->
+                val root = if (clearKeysRoot == ClearKeysRoot.TARGET) target else itemView
+                ViewUtils.getChildView1(root, tree.treeStacks[key])
+            }
+            val text = renderedTextDeep(target)
+                ?: target.contentDescription?.toString()
+                ?: kind
+            return BubbleTarget(
+                bubbleView = target,
+                textView = null,
+                kind = classifyKind(kind, text),
+                applyTextPadding = false,
+                layoutView = target,
+                clearViews = clearViews,
+                signatureText = text.ifBlank { kind },
+                clipToOutline = clipToOutline
+            )
+        }
+
+        private fun classifyKind(fallback: String, text: String): String {
+            return when {
+                text.contains("微信转账") ||
+                        text.contains("转账") ||
+                        text.contains("收款") ||
+                        text.contains("¥") ||
+                        text.contains("￥") -> classifyTransferKind(text)
+                text.contains("微信红包") || text.contains("红包") -> "redpacket"
+                text.contains("小程序") -> "mini-program"
+                text.contains("个人名片") || text.contains("名片") -> "contact-card"
+                else -> fallback
+            }
+        }
+    }
+
+    private fun findResourceSignalCardTarget(itemView: View): BubbleTarget? {
+        val target = findViewByResourceName(itemView, resourceCallBubble) ?: return null
+        val sample = renderedTextDeep(target).orEmpty()
+        val hasTransferOrGenericCardSignals = hasAnyResourceName(
+            target,
+            "a3u",
+            "a3m",
+            "a3y",
+            "a3o",
+            "a3n"
+        )
+        val hasModernTransferSignals = findViewByResourceName(target, "a48") != null &&
+                findViewByResourceName(target, "a46") != null &&
+                (findViewByResourceName(target, "a44") != null ||
+                        findViewByResourceName(target, "a45") != null ||
+                        findViewByResourceName(target, "gbh") != null)
+        val hasTransferTextSignal = hasTransferTextSignal(sample)
+        val hasMiniProgramSignals = hasAnyResourceName(
+            target,
+            "biq",
+            "biu",
+            "big",
+            "bit",
+            "bif",
+            "bko"
+        )
+        val hasWebShareSignals = hasAnyResourceName(
+            target,
+            "bju",
+            "bj2",
+            "bjr",
+            "bjs"
+        )
+        if (!hasTransferOrGenericCardSignals &&
+            !hasModernTransferSignals &&
+            !hasTransferTextSignal &&
+            !hasMiniProgramSignals &&
+            !hasWebShareSignals
+        ) {
+            return null
+        }
+        val clearViews = listOfNotNull(
+            findViewByResourceName(target, "bma"),
+            findViewByResourceName(target, "bmb"),
+            findViewByResourceName(target, "bko")
+        )
+        return BubbleTarget(
+            bubbleView = target,
+            textView = null,
+            kind = classifyKnownCardKind(
+                text = sample,
+                hasTransferSignals = hasTransferOrGenericCardSignals ||
+                        hasModernTransferSignals ||
+                        hasTransferTextSignal,
+                hasMiniProgramSignals = hasMiniProgramSignals,
+                hasWebShareSignals = hasWebShareSignals
+            ),
+            applyTextPadding = false,
+            layoutView = target,
+            clearViews = clearViews,
+            signatureText = sample.ifBlank { "card:${resourceName(target).orEmpty()}" },
+            clipToOutline = true
+        )
+    }
+
+    private fun classifyKnownCardKind(
+        text: String,
+        hasTransferSignals: Boolean,
+        hasMiniProgramSignals: Boolean,
+        hasWebShareSignals: Boolean
+    ): String {
+        return when {
+            hasTransferSignals -> classifyTransferKind(text)
+            text.contains("微信红包") || text.contains("红包") -> "redpacket"
+            hasMiniProgramSignals || text.contains("小程序") -> "mini-program"
+            text.contains("个人名片") || text.contains("名片") -> "contact-card"
+            hasWebShareSignals -> "rich-card"
+            else -> "rich-card"
+        }
+    }
+
+    private fun hasTransferTextSignal(text: String): Boolean {
+        val hasCurrency = text.contains("¥") || text.contains("￥")
+        val hasTransferStatus = text.contains("请收款") ||
+                text.contains("已收款") ||
+                text.contains("待入账") ||
+                text.contains("已退还") ||
+                text.contains("已过期") ||
+                text.contains("已取消")
+        return text.contains("微信转账") ||
+                text.contains("转账") ||
+                (hasCurrency && hasTransferStatus)
+    }
+
+    private fun classifyTransferKind(text: String): String {
+        return if (text.contains("已收款") ||
+            text.contains("已被接收") ||
+            text.contains("待入账") ||
+            text.contains("已退还") ||
+            text.contains("已过期") ||
+            text.contains("已取消")
+        ) {
+            "transfer-received"
+        } else {
+            "transfer"
+        }
+    }
+
+    private fun findImageBubbleTargetByStructure(itemView: View): BubbleTarget? {
+        if (findViewByResourceName(itemView, resourceMessage) != null ||
+            findViewByResourceName(itemView, resourceCallBubble) != null ||
+            findViewByResourceName(itemView, resourceVoiceBubble) != null
+        ) {
+            return null
+        }
+        val candidates = mutableListOf<ImageBubbleCandidate>()
+        collectImageBubbleCandidates(itemView, itemView, candidates, depth = 0)
+        val candidate = candidates.maxByOrNull { it.score } ?: return null
+        val target = nearestCompactImageContainer(candidate.view)
+        return BubbleTarget(
+            bubbleView = target,
+            textView = null,
+            kind = "image",
+            applyTextPadding = false,
+            layoutView = target,
+            signatureText = "image:${target.width}x${target.height}",
+            clipToOutline = true
+        )
+    }
+
+    private data class ImageBubbleCandidate(
+        val view: ImageView,
+        val score: Int
+    )
+
+    private fun collectImageBubbleCandidates(
+        itemView: View,
+        current: View,
+        candidates: MutableList<ImageBubbleCandidate>,
+        depth: Int
+    ) {
+        if (depth > 9 || current.visibility != View.VISIBLE) {
+            return
+        }
+        if (current is ImageView && isLikelyChatImage(itemView, current)) {
+            candidates += ImageBubbleCandidate(current, current.width * current.height)
+        }
+        val group = current as? ViewGroup ?: return
+        for (index in 0 until group.childCount) {
+            collectImageBubbleCandidates(itemView, group.getChildAt(index), candidates, depth + 1)
+        }
+    }
+
+    private fun isLikelyChatImage(itemView: View, image: ImageView): Boolean {
+        findViewByResourceName(itemView, resourceAvatar)?.let { avatar ->
+            if (image === avatar || containsView(image, avatar) || containsView(avatar, image)) {
+                return false
+            }
+        }
+        val name = resourceName(image)
+        if (name in setOf("bqx", "ott", "br0", "bkq", "bqz", "bjq", "bjk", "ins")) {
+            return false
+        }
+        val minSide = dp(image, 48f)
+        val maxSide = dp(image, 340f)
+        if (image.width < minSide || image.height < minSide) {
+            return false
+        }
+        return image.width <= maxSide && image.height <= dp(image, 520f)
+    }
+
+    private fun nearestCompactImageContainer(image: ImageView): View {
+        var target: View = image
+        var current = image.parent as? View
+        var depth = 0
+        while (current is ViewGroup && depth < 3) {
+            val widthDelta = kotlin.math.abs(current.width - image.width)
+            val heightDelta = kotlin.math.abs(current.height - image.height)
+            val compact = current.width > 0 &&
+                    current.height > 0 &&
+                    widthDelta <= dp(image, 24f) &&
+                    heightDelta <= dp(image, 24f)
+            if (!compact || current.childCount > 4) {
+                break
+            }
+            target = current
+            current = current.parent as? View
+            depth++
+        }
+        return target
+    }
+
+    private fun findRichCardBubbleTarget(itemView: View): BubbleTarget? {
+        val row = findViewByResourceName(itemView, "bkj") ?: itemView
+        val group = row as? ViewGroup ?: return null
+        val candidates = mutableListOf<RichCardCandidate>()
+        collectRichCardCandidates(
+            root = group,
+            itemView = itemView,
+            current = group,
+            depth = 0,
+            candidates = candidates
+        )
+        val candidate = candidates.maxByOrNull { it.score } ?: return null
+        val kind = classifyRichCard(candidate.metrics.textSample)
+        return BubbleTarget(
+            bubbleView = candidate.view,
+            textView = null,
+            kind = kind,
+            applyTextPadding = false,
+            layoutView = candidate.view,
+            signatureText = candidate.metrics.textSample.ifBlank { kind },
+            clipToOutline = true
+        )
+    }
+
+    private fun collectRichCardCandidates(
+        root: ViewGroup,
+        itemView: View,
+        current: View,
+        depth: Int,
+        candidates: MutableList<RichCardCandidate>
+    ): RichCardMetrics {
+        if (current.visibility != View.VISIBLE) {
+            return RichCardMetrics(textCount = 0, imageCount = 0, textSample = "")
+        }
+        var textCount = if (isTextBearingLeaf(current)) 1 else 0
+        var imageCount = if (isImageBearingLeaf(current)) 1 else 0
+        val samples = mutableListOf<String>()
+        renderedText(current)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() && !isTimeLikeText(it) }
+            ?.let { samples.add(it) }
+
+        val group = current as? ViewGroup
+        if (group != null && depth < 8) {
+            for (index in 0 until group.childCount) {
+                val metrics = collectRichCardCandidates(
+                    root = root,
+                    itemView = itemView,
+                    current = group.getChildAt(index),
+                    depth = depth + 1,
+                    candidates = candidates
+                )
+                textCount += metrics.textCount
+                imageCount += metrics.imageCount
+                if (metrics.textSample.isNotBlank()) {
+                    samples.add(metrics.textSample)
+                }
+            }
+        }
+
+        val textSample = samples
+            .joinToString(" ")
+            .replace(Regex("\\s+"), " ")
+            .take(160)
+        val metrics = RichCardMetrics(
+            textCount = textCount,
+            imageCount = imageCount,
+            textSample = textSample
+        )
+        if (group != null && isRichCardCandidate(root, itemView, current, metrics)) {
+            val score = richCardCandidateScore(current, metrics)
+            candidates.add(RichCardCandidate(current, metrics, score))
+        }
+        return metrics
+    }
+
+    private fun isRichCardCandidate(
+        root: ViewGroup,
+        itemView: View,
+        view: View,
+        metrics: RichCardMetrics
+    ): Boolean {
+        if (view === root || view === itemView) {
+            return false
+        }
+        val name = resourceName(view)
+        if (name == resourceItemRoot ||
+            name == "bkj" ||
+            name == resourceMessage ||
+            name == resourceAvatar ||
+            name == resourceNickname ||
+            name == resourceNicknameModern ||
+            name == resourceVoiceContainer ||
+            name == resourceVoiceBubble ||
+            name == resourceCallBubble
+        ) {
+            return false
+        }
+        findViewByResourceName(itemView, resourceAvatar)?.let { avatar ->
+            if (containsView(view, avatar)) {
+                return false
+            }
+        }
+        findNicknameView(itemView)?.let { nickname ->
+            if (containsView(view, nickname)) {
+                return false
+            }
+        }
+        if (view.width < dp(view, 96f) ||
+            view.height < dp(view, 52f) ||
+            view.width > dp(view, 360f) ||
+            view.height > dp(view, 560f)
+        ) {
+            return false
+        }
+        if (itemView.width > 0 && view.width >= itemView.width - dp(view, 72f)) {
+            return false
+        }
+        val hasRichStructure = metrics.textCount >= 2 ||
+                (metrics.textCount >= 1 && metrics.imageCount >= 1)
+        return hasRichStructure || hasRichCardTextMarker(metrics.textSample)
+    }
+
+    private fun richCardCandidateScore(view: View, metrics: RichCardMetrics): Int {
+        val markerScore = if (hasRichCardTextMarker(metrics.textSample)) 120 else 0
+        val backgroundScore = if (view.background != null) 90 else 0
+        val clickableScore = if (view.isClickable || view.isLongClickable) 30 else 0
+        val structureScore = metrics.textCount * 18 + metrics.imageCount * 12
+        val areaScore = ((view.width * view.height) / 8000).coerceIn(0, 160)
+        return markerScore + backgroundScore + clickableScore + structureScore + areaScore
+    }
+
+    private fun classifyRichCard(text: String): String {
+        return when {
+            text.contains("微信转账") ||
+                    text.contains("转账") ||
+                    text.contains("收款") ||
+                    text.contains("¥") ||
+                    text.contains("￥") -> classifyTransferKind(text)
+            text.contains("微信红包") || text.contains("红包") -> "redpacket"
+            text.contains("小程序") -> "mini-program"
+            text.contains("个人名片") || text.contains("名片") -> "contact-card"
+            else -> "rich-card"
+        }
+    }
+
+    private fun hasRichCardTextMarker(text: String): Boolean {
+        return listOf(
+            "微信转账",
+            "转账",
+            "微信红包",
+            "红包",
+            "小程序",
+            "个人名片",
+            "名片",
+            "公众号",
+            "文件",
+            "链接"
+        ).any { marker ->
+            text.contains(marker, ignoreCase = true)
+        }
+    }
+
+    private fun isTextBearingLeaf(view: View): Boolean {
+        if (view is ViewGroup) {
+            return false
+        }
+        return !renderedText(view).isNullOrBlank()
+    }
+
+    private fun isImageBearingLeaf(view: View): Boolean {
+        if (view is ImageView) {
+            return true
+        }
+        return view.javaClass.name.contains("ImageView")
+    }
+
+    private fun isTimeLikeText(text: String): Boolean {
+        val value = text.trim()
+        return timeTextPattern.matches(value) ||
+                value.contains("昨天") ||
+                value.contains("星期") ||
+                value.contains("周") ||
+                value.contains("月") && value.contains("日")
     }
 
     private fun hasBubbleTarget(itemView: View): Boolean {
@@ -646,6 +1233,49 @@ object ModernChatBubbleRenderer {
 
     private fun renderedText(view: View?): String? {
         return ModernChatBubbleStyler.extractRenderedText(view)
+    }
+
+    private fun renderedTextDeep(view: View?, depth: Int = 0): String? {
+        view ?: return null
+        if (depth > 8 || view.visibility != View.VISIBLE) {
+            return null
+        }
+        val parts = mutableListOf<String>()
+        renderedText(view)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() && !isTimeLikeText(it) }
+            ?.let { parts.add(it) }
+        val group = view as? ViewGroup
+        if (group != null) {
+            for (index in 0 until group.childCount) {
+                renderedTextDeep(group.getChildAt(index), depth + 1)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { parts.add(it) }
+            }
+        }
+        return parts
+            .joinToString(" ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .takeIf { it.isNotBlank() }
+    }
+
+    private fun hasAnyResourceName(root: View, vararg names: String): Boolean {
+        val wanted = names.toSet()
+        return containsAnyResourceName(root, wanted)
+    }
+
+    private fun containsAnyResourceName(view: View, names: Set<String>): Boolean {
+        if (resourceName(view) in names) {
+            return true
+        }
+        val group = view as? ViewGroup ?: return false
+        for (index in 0 until group.childCount) {
+            if (containsAnyResourceName(group.getChildAt(index), names)) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun probe(view: View, message: String) {
@@ -901,6 +1531,66 @@ object ModernChatBubbleRenderer {
         palette: ChatBubbleStylePolicy.BubblePalette
     ): String {
         return "${state.stableKey}:${state.side}:${state.position}:${text.hashCode()}:${palette.signature}"
+    }
+
+    private fun paletteForTarget(
+        target: BubbleTarget,
+        state: ChatBubbleStylePolicy.RenderState
+    ): ChatBubbleStylePolicy.BubblePalette {
+        val base = ModernChatBubbleColors.palette(state.side)
+        return when (target.kind) {
+            "transfer" -> base.copy(
+                bubbleColor = 0xFFF39B3B.toInt(),
+                pressedBubbleColor = scaleRgb(0xFFF39B3B.toInt(), 0.95f),
+                textColor = 0xFFFFFFFF.toInt(),
+                semanticTextColor = 0xFFFFF2DE.toInt(),
+                quoteFillColor = 0x26FFFFFF,
+                quoteTextColor = 0xE6FFFFFF.toInt(),
+                strokeColor = ChatBubbleStylePolicy.TRANSPARENT_COLOR,
+                strokeWidthDp = 0f
+            )
+            "transfer-received" -> base.copy(
+                bubbleColor = 0xFFFBE3C5.toInt(),
+                pressedBubbleColor = scaleRgb(0xFFFBE3C5.toInt(), 0.97f),
+                textColor = 0xFFE0852A.toInt(),
+                semanticTextColor = 0xFFE0852A.toInt(),
+                quoteFillColor = 0x33F39B3B,
+                quoteTextColor = 0xFFE0852A.toInt(),
+                strokeColor = ChatBubbleStylePolicy.TRANSPARENT_COLOR,
+                strokeWidthDp = 0f
+            )
+            "redpacket" -> base.copy(
+                bubbleColor = 0xFFE86D36.toInt(),
+                pressedBubbleColor = scaleRgb(0xFFE86D36.toInt(), 0.95f),
+                textColor = 0xFFFFFFFF.toInt(),
+                semanticTextColor = 0xFFFFEBDD.toInt(),
+                quoteFillColor = 0x26FFFFFF,
+                quoteTextColor = 0xE6FFFFFF.toInt(),
+                strokeColor = ChatBubbleStylePolicy.TRANSPARENT_COLOR,
+                strokeWidthDp = 0f
+            )
+            "contact-card",
+            "position",
+            "mini-program",
+            "rich-card" -> ChatBubbleStylePolicy.cardPalette()
+            else -> base
+        }
+    }
+
+    private fun applyContentClipIfNeeded(view: View, target: BubbleTarget) {
+        if (!target.clipToOutline || Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return
+        }
+        view.clipToOutline = true
+    }
+
+    private fun scaleRgb(color: Int, factor: Float): Int {
+        return Color.argb(
+            Color.alpha(color),
+            (Color.red(color) * factor).toInt().coerceIn(0, 255),
+            (Color.green(color) * factor).toInt().coerceIn(0, 255),
+            (Color.blue(color) * factor).toInt().coerceIn(0, 255)
+        )
     }
 
     private fun isCurrentRender(
