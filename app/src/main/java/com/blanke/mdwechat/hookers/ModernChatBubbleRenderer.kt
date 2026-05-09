@@ -1,12 +1,19 @@
 package com.blanke.mdwechat.hookers
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorFilter
 import android.graphics.Outline
+import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PixelFormat
 import android.graphics.RectF
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.text.TextUtils
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -41,6 +48,23 @@ object ModernChatBubbleRenderer {
     private const val keyAppliedSignature = "mdwechat_native_bubble_applied_signature"
     private const val keyBoundaryRefreshSignature = "mdwechat_native_bubble_boundary_refresh_signature"
     private const val keyPendingAppendRefresh = "mdwechat_native_bubble_pending_append_refresh"
+    private const val keyPendingAttachedReapply = "mdwechat_native_bubble_pending_attached_reapply"
+    private const val keyPendingMiniProgramMeasuredTune = "mdwechat_native_bubble_pending_mini_program_measured_tune"
+    private const val keyPendingContactMeasuredTune = "mdwechat_native_bubble_pending_contact_measured_tune"
+    private const val keyPendingPaymentMeasuredTune = "mdwechat_native_bubble_pending_payment_measured_tune"
+    private const val keyPendingPositionMeasuredTune = "mdwechat_native_bubble_pending_position_measured_tune"
+    private const val miniProgramReferenceCardWidth = 260f
+    private const val miniProgramReferenceCardHeight = 234.75f
+    private const val contactReferenceCardWidth = 240f
+    private const val contactReferenceCardHeight = 103.5f
+    private const val positionReferenceCardWidth = 240f
+    private const val positionReferenceCardHeight = 167f
+    private const val positionReferenceHeaderHeight = 65f
+    private const val positionReferenceMapHeight = 100f
+    private const val transferReferenceCardWidth = 240f
+    private const val transferReferenceCardHeight = 115f
+    private const val transferReferenceHeaderHeight = 69f
+    private const val transferReferenceFooterHeight = 46f
     private const val probeFile = "native_bubble_renderer.txt"
     private const val enableRendererProbe = false
     private const val enableGenericRichCardHeuristic = false
@@ -56,6 +80,7 @@ object ModernChatBubbleRenderer {
         val applyTextPadding: Boolean,
         val layoutView: View = bubbleView,
         val clearViews: List<View> = emptyList(),
+        val namedViews: Map<String, View> = emptyMap(),
         val signatureText: String? = null,
         val clipToOutline: Boolean = false
     )
@@ -73,7 +98,15 @@ object ModernChatBubbleRenderer {
     )
 
     fun applyFromAdapterBind(adapter: Any, position: Int, itemView: View): Boolean {
-        val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(adapter, position)
+        val root = findItemRoot(itemView) ?: itemView
+        val splitBefore = hasVisibleTimeSeparator(root)
+        val splitAfter = nextVisibleItem(root)?.let { hasVisibleTimeSeparator(it) } == true
+        val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(
+            adapter = adapter,
+            position = position,
+            hasTimeBeforeCurrent = splitBefore,
+            hasTimeBeforeNext = splitAfter
+        )
         if (state == null) {
             probe(itemView, "adapter.noState:${adapter.javaClass.name}:$position")
             debug(itemView, "adapterBind noState adapter=${adapter.javaClass.name} pos=$position")
@@ -84,13 +117,36 @@ object ModernChatBubbleRenderer {
             "adapterBind state adapter=${adapter.javaClass.name} pos=$position " +
                     "key=${state.stableKey.takeLast(10)} side=${state.side} group=${state.position}"
         )
-        ModernChatBubbleStyler.rememberBoundRenderState(adapter, position, itemView, state)
-        val applied = applyState(itemView, state, "adapter:${adapter.javaClass.simpleName}:$position")
+        ModernChatBubbleStyler.rememberBoundRenderState(adapter, position, root, state)
+        val applied = applyState(root, state, "adapter:${adapter.javaClass.simpleName}:$position")
+        scheduleAttachedReapplyIfNeeded(adapter, position, root, state)
         if (applied) {
-            refreshPreviousItemAcrossTimeSeparator(adapter, position, itemView)
-            refreshVisibleNeighborItemsIfNeeded(adapter, position, findItemRoot(itemView) ?: itemView, state)
+            refreshPreviousItemAcrossTimeSeparator(adapter, position, root)
+            refreshVisibleNeighborItemsIfNeeded(adapter, position, root, state)
         }
         return applied
+    }
+
+    private fun scheduleAttachedReapplyIfNeeded(
+        adapter: Any,
+        position: Int,
+        itemView: View,
+        state: ChatBubbleStylePolicy.RenderState
+    ) {
+        if (state.side != ChatBubbleStylePolicy.Side.LEFT ||
+            state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE ||
+            findRecyclerParent(itemView) != null ||
+            XposedHelpers.getAdditionalInstanceField(itemView, keyPendingAttachedReapply) == true
+        ) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(itemView, keyPendingAttachedReapply, true)
+        itemView.post {
+            XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingAttachedReapply)
+            if (findRecyclerParent(itemView) != null) {
+                applyFromAdapterBind(adapter, position, itemView)
+            }
+        }
     }
 
     fun applyVisibleChildrenFromAdapter(recycler: ViewGroup, adapter: Any): Int {
@@ -150,6 +206,7 @@ object ModernChatBubbleRenderer {
         val signature = renderSignature(renderState, text, palette)
         if (isCurrentRender(itemView, bubbleView, renderState, signature)) {
             syncReusableState(itemView, target, renderState)
+            tuneRichCardContent(target)
             debugApply(itemView, bubbleView, renderState, source, text, "current")
             scheduleBoundaryRefresh(itemView, state, renderState, source)
             return true
@@ -185,6 +242,7 @@ object ModernChatBubbleRenderer {
             bubbleView.setPadding(dp(bubbleView, 13f), dp(bubbleView, 8.5f), dp(bubbleView, 13f), dp(bubbleView, 8.5f))
         }
         setBubbleTextColors(target, palette.textColor, palette.semanticTextColor)
+        tuneRichCardContent(target)
         applyShadow(bubbleView, renderState)
         applyContentClipIfNeeded(bubbleView, target)
         disableAncestorClipping(bubbleView)
@@ -193,9 +251,8 @@ object ModernChatBubbleRenderer {
         val marginTarget = layoutView.parent as? View ?: layoutView
         setTopMargin(marginTarget, dp(bubbleView, renderState.topMarginDp))
         normalizeMessageColumn(itemView, layoutView, renderState)
-        styleQuoteBlock(itemView, layoutView, renderState, palette)
-        setAvatarVisibility(findViewByResourceName(itemView, resourceAvatar), renderState.showAvatar)
-        setNicknameVisibility(findNicknameView(itemView), renderState.showNickname)
+        styleQuoteBlock(itemView, target, renderState, palette)
+        syncAvatarAndNicknameState(itemView, target, renderState)
         normalizeRow(itemView, layoutView, renderState)
         XposedHelpers.setAdditionalInstanceField(itemView, keyAppliedSignature, signature)
         probe(bubbleView, "$source.applied:${renderState.side}:${renderState.position}:${target.kind}:${text.take(16)}")
@@ -238,8 +295,14 @@ object ModernChatBubbleRenderer {
         if (position < 0 || itemView == null) {
             return
         }
-        val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(adapter, position) ?: return
-        applyState(itemView, state, "adapter-$source:${adapter.javaClass.simpleName}:$position")
+        val root = findItemRoot(itemView) ?: itemView
+        val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(
+            adapter = adapter,
+            position = position,
+            hasTimeBeforeCurrent = hasVisibleTimeSeparator(root),
+            hasTimeBeforeNext = nextVisibleItem(root)?.let { hasVisibleTimeSeparator(it) } == true
+        ) ?: return
+        applyState(root, state, "adapter-$source:${adapter.javaClass.simpleName}:$position")
     }
 
     private fun scheduleRightAppendRefresh(
@@ -326,7 +389,7 @@ object ModernChatBubbleRenderer {
         return state.copy(
             position = position,
             showAvatar = ChatBubbleStylePolicy.showAvatar(position),
-            showNickname = ChatBubbleStylePolicy.showNickname(position),
+            showNickname = ChatBubbleStylePolicy.showNickname(state.side, position),
             topMarginDp = ChatBubbleStylePolicy.topMarginDp(position),
             cornerRadii = ChatBubbleStylePolicy.cornerRadii(state.side, position)
         )
@@ -346,12 +409,6 @@ object ModernChatBubbleRenderer {
             return
         }
         XposedHelpers.setAdditionalInstanceField(itemView, keyBoundaryRefreshSignature, refreshSignature)
-        itemView.post {
-            val latestState = applyVisibleBoundaries(itemView, state)
-            if (latestState.position != appliedState.position) {
-                applyState(itemView, state, "$source.post")
-            }
-        }
     }
 
     private fun refreshPreviousItemAcrossTimeSeparator(adapter: Any, position: Int, itemView: View) {
@@ -359,8 +416,47 @@ object ModernChatBubbleRenderer {
             return
         }
         val previousItem = previousVisibleMessageItem(itemView) ?: return
-        val previousState = ModernChatBubbleStyler.resolveRenderStateFromAdapter(adapter, position - 1) ?: return
+        visibleBoundaryEndState(previousItem)?.let { previousState ->
+            applyState(previousItem, previousState, "visible-boundary:${adapter.javaClass.simpleName}:${position - 1}")
+            return
+        }
+        val previousState = ModernChatBubbleStyler.resolveRenderStateFromAdapter(
+            adapter = adapter,
+            position = position - 1,
+            hasTimeBeforeCurrent = hasVisibleTimeSeparator(previousItem),
+            hasTimeBeforeNext = true
+        ) ?: return
         applyState(previousItem, previousState, "adapter-neighbor:${adapter.javaClass.simpleName}:${position - 1}")
+    }
+
+    private fun visibleBoundaryEndState(itemView: View): ChatBubbleStylePolicy.RenderState? {
+        val target = findBubbleTarget(itemView) ?: return null
+        val bubble = target.bubbleView.background as? ModernBubbleDrawable ?: return null
+        val position = ChatBubbleStylePolicy.positionWithoutNext(bubble.position)
+        if (position == bubble.position) {
+            return null
+        }
+        return renderState(
+            stableKey = bubble.stableKey,
+            side = bubble.side,
+            position = position
+        )
+    }
+
+    private fun renderState(
+        stableKey: String,
+        side: ChatBubbleStylePolicy.Side,
+        position: ChatBubbleStylePolicy.GroupPosition
+    ): ChatBubbleStylePolicy.RenderState {
+        return ChatBubbleStylePolicy.RenderState(
+            stableKey = stableKey,
+            side = side,
+            position = position,
+            showAvatar = ChatBubbleStylePolicy.showAvatar(position),
+            showNickname = ChatBubbleStylePolicy.showNickname(side, position),
+            topMarginDp = ChatBubbleStylePolicy.topMarginDp(position),
+            cornerRadii = ChatBubbleStylePolicy.cornerRadii(side, position)
+        )
     }
 
     private fun clearOriginalBubbleContainers(messageView: View) {
@@ -411,10 +507,14 @@ object ModernChatBubbleRenderer {
 
     private fun styleQuoteBlock(
         itemView: View,
-        messageView: View,
+        target: BubbleTarget,
         state: ChatBubbleStylePolicy.RenderState,
         palette: ChatBubbleStylePolicy.BubblePalette
     ) {
+        if (target.kind != "text") {
+            return
+        }
+        val messageView = target.layoutView
         val quoteText = findViewByResourceName(itemView, resourceQuoteText) ?: return
         val quote = renderedText(quoteText)
         if (!isRealQuotePreviewText(quote) || quoteText === messageView) {
@@ -467,8 +567,8 @@ object ModernChatBubbleRenderer {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
             return
         }
-        view.elevation = dp(view, 4.5f).toFloat()
-        view.translationZ = dp(view, 0.5f).toFloat()
+        view.elevation = dp(view, 5.5f).toFloat()
+        view.translationZ = dp(view, 0.75f).toFloat()
         view.outlineProvider = object : ViewOutlineProvider() {
             private val outlinePath = Path()
             private val outlineRect = RectF()
@@ -503,7 +603,7 @@ object ModernChatBubbleRenderer {
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val shadowColor = Color.argb(32, 0, 0, 0)
+            val shadowColor = Color.argb(34, 0, 0, 0)
             view.outlineAmbientShadowColor = shadowColor
             view.outlineSpotShadowColor = shadowColor
         }
@@ -545,6 +645,898 @@ object ModernChatBubbleRenderer {
         }
     }
 
+    private fun tuneRichCardContent(target: BubbleTarget) {
+        if (!isTunableRichCard(target.kind)) {
+            return
+        }
+        tuneRichCardContentNow(target)
+    }
+
+    private fun isTunableRichCard(kind: String): Boolean {
+        return kind == "mini-program" ||
+                kind == "contact-card" ||
+                kind == "position" ||
+                kind == "rich-card" ||
+                kind == "transfer" ||
+                kind == "transfer-received" ||
+                kind == "redpacket"
+    }
+
+    private fun tuneRichCardContentNow(target: BubbleTarget) {
+        when (target.kind) {
+            "mini-program" -> tuneMiniProgramCard(target.bubbleView)
+            "contact-card" -> tuneContactCard(target.bubbleView)
+            "position" -> tunePositionCard(target.bubbleView)
+            "rich-card" -> tuneGenericCard(target.bubbleView)
+            "transfer" -> tunePaymentCard(target.bubbleView, dividerColor = 0x33FFFFFF, received = false)
+            "transfer-received" -> tunePaymentCard(target.bubbleView, dividerColor = 0x33E0852A, received = true)
+            "redpacket" -> tuneRedpacketCard(target)
+        }
+    }
+
+    private fun tuneMiniProgramCard(card: View) {
+        val needsMeasuredTune = card.width <= dp(card, 34f)
+        setTextColorByName(card, "biu", 0xFF4F5850.toInt())
+        setTextColorByName(card, "biq", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
+        setTextColorByName(card, "bit", 0xFF8F968E.toInt())
+        setMiniProgramCardMinHeight(card)
+        tuneMiniProgramTitle(card)
+        setMiniProgramPreviewStyle(card)
+        tuneMiniProgramFooter(card)
+        if (needsMeasuredTune) {
+            scheduleMiniProgramMeasuredTune(card)
+        }
+    }
+
+    private fun scheduleMiniProgramMeasuredTune(card: View) {
+        if (XposedHelpers.getAdditionalInstanceField(card, keyPendingMiniProgramMeasuredTune) == true) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(card, keyPendingMiniProgramMeasuredTune, true)
+        card.post {
+            XposedHelpers.removeAdditionalInstanceField(card, keyPendingMiniProgramMeasuredTune)
+            if (card.width > dp(card, 34f) && card.visibility == View.VISIBLE) {
+                tuneMiniProgramCard(card)
+            }
+        }
+    }
+
+    private fun tuneMiniProgramTitle(card: View) {
+        val title = findViewByResourceName(card, "biq") as? TextView ?: return
+        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f)
+        title.setLineSpacing(0f, 1.0f)
+        if (title.maxLines != 2) {
+            title.maxLines = 2
+        }
+        if (title.ellipsize != TextUtils.TruncateAt.END) {
+            title.ellipsize = TextUtils.TruncateAt.END
+        }
+        title.setMinLines(0)
+        title.setMinHeight(0)
+        title.minimumHeight = 0
+        title.includeFontPadding = false
+        setInsetWidthAndMargins(
+            view = title,
+            contentWidth = card.width,
+            left = dp(card, 17f),
+            right = dp(card, 17f)
+        )
+        setLayoutHeight(title, ViewGroup.LayoutParams.WRAP_CONTENT)
+    }
+
+    private fun setMiniProgramPreviewStyle(card: View) {
+        val imageView = findViewByResourceName(card, "big") as? ImageView ?: return
+        val panel = imageView.parent as? View ?: imageView
+        setExactHeight(panel, dp(card, 98.5f))
+        setInsetWidthAndMargins(
+            view = panel,
+            contentWidth = card.width,
+            left = dp(card, 17f),
+            right = dp(card, 17f)
+        )
+        if (panel !== imageView) {
+            setExactHeight(imageView, ViewGroup.LayoutParams.MATCH_PARENT)
+            setInsetWidthAndMargins(
+                view = imageView,
+                contentWidth = panel.width.takeIf { it > 0 } ?: (card.width - dp(card, 34f)),
+                left = 0,
+                right = 0
+            )
+        }
+        panel.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(0xFFF7F8F7.toInt())
+            setStroke(dp(card, 0.75f), 0x0F000000)
+            cornerRadius = dp(card, 12f).toFloat()
+        }
+        if (imageView.scaleType != ImageView.ScaleType.CENTER_CROP) {
+            imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        panel.minimumHeight = 0
+        clipRounded(panel, radiusDp = 12f)
+    }
+
+    private fun tuneMiniProgramFooter(card: View) {
+        val footer = findViewByResourceName(card, "bir") as? ViewGroup ?: return
+        footer.minimumHeight = 0
+        setTopMargin(footer, dp(card, 10f))
+        if (footer.childCount > 0) {
+            tuneFixedCardDividerView(
+                view = footer.getChildAt(0),
+                contentWidth = card.width,
+                horizontalInset = dp(card, 17f),
+                dividerColor = 0x0F000000,
+                dividerHeight = dp(card, 1f)
+            )
+        }
+        if (footer.childCount > 1) {
+            val footerRow = footer.getChildAt(1)
+            setTopMargin(footerRow, dp(card, 8f))
+            setInsetWidthAndMargins(
+                view = footerRow,
+                contentWidth = card.width,
+                left = dp(card, 9f),
+                right = dp(card, 17f)
+            )
+        }
+    }
+
+    private fun setMiniProgramCardMinHeight(card: View) {
+        if (card.width <= dp(card, 34f)) {
+            return
+        }
+        val desiredHeight = (card.width * miniProgramReferenceCardHeight / miniProgramReferenceCardWidth + 0.5f).toInt()
+        if (card.minimumHeight != desiredHeight) {
+            card.minimumHeight = desiredHeight
+            card.requestLayout()
+        }
+    }
+
+    private fun tuneContactCard(card: View) {
+        val needsMeasuredTune = card.width <= dp(card, 34f)
+        setTextColorByName(card, "bpv", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
+        setTextColorByName(card, "br9", 0xFF8F968E.toInt())
+        setContactCardMinHeight(card)
+        tuneContactHeader(card)
+        tuneContactDivider(card)
+        tuneContactFooter(card)
+        if (needsMeasuredTune) {
+            scheduleContactMeasuredTune(card)
+        }
+    }
+
+    private fun setContactCardMinHeight(card: View) {
+        if (card.width <= dp(card, 34f)) {
+            return
+        }
+        val desiredHeight = (card.width * contactReferenceCardHeight / contactReferenceCardWidth + 0.5f).toInt()
+        setExactHeight(card, desiredHeight)
+    }
+
+    private fun scheduleContactMeasuredTune(card: View) {
+        if (XposedHelpers.getAdditionalInstanceField(card, keyPendingContactMeasuredTune) == true) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(card, keyPendingContactMeasuredTune, true)
+        card.post {
+            XposedHelpers.removeAdditionalInstanceField(card, keyPendingContactMeasuredTune)
+            if (card.width > dp(card, 34f) && card.visibility == View.VISIBLE) {
+                tuneContactCard(card)
+            }
+        }
+    }
+
+    private fun tuneContactHeader(card: View) {
+        val avatar = findViewByResourceName(card, "bk2") ?: return
+        setExactSize(avatar, dp(card, 40f), dp(card, 40f))
+        val row = avatar.parent as? ViewGroup
+        row?.setPadding(dp(card, 17f), dp(card, 13f), dp(card, 17f), 0)
+        row?.getChildAt(1)?.let { setLeftMargin(it, dp(card, 12f)) }
+    }
+
+    private fun tuneContactDivider(card: View) {
+        val divider = findWideThinImageView(card) ?: return
+        tuneFixedCardDividerView(
+            view = divider,
+            contentWidth = card.width,
+            horizontalInset = dp(card, 17f),
+            dividerColor = 0x0F000000,
+            dividerHeight = dp(card, 1f)
+        )
+    }
+
+    private fun tuneContactFooter(card: View) {
+        val footer = findViewByResourceName(card, "br9") as? TextView ?: return
+        footer.minimumHeight = dp(card, 20f)
+        footer.setPadding(dp(card, 17f), 0, dp(card, 17f), 0)
+        setTopMargin(footer, dp(card, 8f))
+    }
+
+    private fun tunePositionCard(card: View) {
+        val needsMeasuredTune = card.width <= dp(card, 34f) || card.height <= dp(card, 34f)
+        setTextColorByName(card, "bp8", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
+        setTextColorByName(card, "bp6", 0xFF5F665F.toInt())
+        findViewByResourceName(card, "bko")?.let { background ->
+            clearViewLayer(background)
+            if (background is ImageView) {
+                background.setImageDrawable(null)
+                background.clearColorFilter()
+                background.alpha = 0f
+            }
+        }
+        tunePositionHeader(card)
+        tunePositionDivider(card)
+        tunePositionMapPreview(card)
+        if (needsMeasuredTune) {
+            schedulePositionMeasuredTune(card)
+        }
+    }
+
+    private fun schedulePositionMeasuredTune(card: View) {
+        if (XposedHelpers.getAdditionalInstanceField(card, keyPendingPositionMeasuredTune) == true) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(card, keyPendingPositionMeasuredTune, true)
+        card.post {
+            XposedHelpers.removeAdditionalInstanceField(card, keyPendingPositionMeasuredTune)
+            if (card.width > dp(card, 34f) && card.visibility == View.VISIBLE) {
+                tunePositionCard(card)
+            }
+        }
+    }
+
+    private fun tunePositionHeader(card: View) {
+        if (card.width <= dp(card, 34f)) {
+            return
+        }
+        val header = findViewByResourceName(card, "bp7") ?: return
+        val headerFrame = header.parent as? View ?: header
+        setLayoutHeight(headerFrame, scaledByPositionCardHeight(card, positionReferenceHeaderHeight))
+        setHorizontalMargins(headerFrame, left = 0, right = 0, forceMatchParent = true)
+        setLayoutHeight(header, ViewGroup.LayoutParams.MATCH_PARENT)
+        header.setPadding(
+            scaledByPositionCardWidth(card, 13f),
+            scaledByPositionCardHeight(card, 13f),
+            scaledByPositionCardWidth(card, 13f),
+            0
+        )
+    }
+
+    private fun tunePositionDivider(card: View) {
+        val divider = findWideThinImageView(card) ?: return
+        tuneFixedCardDividerView(
+            view = divider,
+            contentWidth = card.width,
+            horizontalInset = 0,
+            dividerColor = 0x0D000000,
+            dividerHeight = dp(card, 0.75f)
+        )
+    }
+
+    private fun tunePositionMapPreview(card: View) {
+        if (card.width <= dp(card, 34f)) {
+            return
+        }
+        val imageView = findViewByResourceName(card, "bp5") as? ImageView ?: return
+        val panel = imageView.parent as? View ?: imageView
+        clearViewLayer(panel)
+        panel.setPadding(0, 0, 0, 0)
+        panel.minimumHeight = 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            panel.clipToOutline = false
+        }
+        setLayoutHeight(panel, scaledByPositionCardHeight(card, positionReferenceMapHeight))
+        setHorizontalMargins(panel, left = 0, right = 0, forceMatchParent = true)
+        setLayoutHeight(imageView, ViewGroup.LayoutParams.MATCH_PARENT)
+        setHorizontalMargins(imageView, left = 0, right = 0, forceMatchParent = true)
+        imageView.setPadding(0, 0, 0, 0)
+        if (imageView.scaleType != ImageView.ScaleType.CENTER_CROP) {
+            imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        findViewByResourceName(card, "bkp")?.let { marker ->
+            marker.bringToFront()
+        }
+    }
+
+    private fun tuneGenericCard(card: View) {
+        tuneWebShareCard(card)
+        val footerText = deepestVisibleTextView(card) { text ->
+            text.contains("小程序") ||
+                    text.contains("个人名片") ||
+                    text.contains("链接") ||
+                    text.contains("位置")
+        }
+        footerText?.let { setTextColor(it, 0xFF8F968E.toInt(), 0xFF8F968E.toInt()) }
+        tuneDividerLines(card, horizontalInsetDp = 14f)
+    }
+
+    private fun tuneWebShareCard(card: View) {
+        setTextColorByName(card, "bjx", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
+        setTextColorByName(card, "bju", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
+        setTextColorByName(card, "bj2", 0xFF4F5850.toInt())
+        setTextColorByName(card, "bjp", 0xFF8F968E.toInt())
+        listOf("bjl", "bjp").forEach { name ->
+            findViewByResourceName(card, name)?.let { clearViewLayer(it) }
+        }
+        setWebSharePreviewStyle(card)
+    }
+
+    private fun setWebSharePreviewStyle(card: View) {
+        val imageView = findViewByResourceName(card, "bjs") as? ImageView ?: return
+        val panel = findViewByResourceName(card, "bjr") ?: (imageView.parent as? View) ?: imageView
+        panel.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(0xFFF7F8F7.toInt())
+            setStroke(dp(card, 0.75f), 0x0F000000)
+            cornerRadius = dp(card, 12f).toFloat()
+        }
+        panel.minimumHeight = 0
+        clipRounded(panel, radiusDp = 12f)
+    }
+
+    private fun tunePaymentCard(card: View, dividerColor: Int, received: Boolean) {
+        val needsMeasuredTune = card.width <= dp(card, 34f)
+        setPaymentCardHeight(card)
+        tunePaymentHeader(card, received)
+        tunePaymentFooter(card)
+        tunePaymentDivider(card, dividerColor, received)
+        if (needsMeasuredTune) {
+            schedulePaymentMeasuredTune(card, dividerColor, received)
+        }
+    }
+
+    private fun setPaymentCardHeight(card: View) {
+        if (card.width <= dp(card, 34f)) {
+            return
+        }
+        setExactHeight(card, scaledByCardWidth(card, transferReferenceCardHeight))
+    }
+
+    private fun tunePaymentHeader(card: View, received: Boolean) {
+        if (card.width <= dp(card, 34f)) {
+            return
+        }
+        val icon = findViewByResourceName(card, "a45") ?: return
+        val header = icon.parent as? ViewGroup ?: return
+        setExactHeight(header, scaledByCardWidth(card, transferReferenceHeaderHeight))
+        setExactSize(
+            view = icon,
+            width = scaledByCardWidth(card, 40f),
+            height = scaledByCardWidth(card, 40f)
+        )
+        setPaymentMargins(
+            view = icon,
+            left = 0,
+            top = scaledByCardWidth(card, 2.7f)
+        )
+        setPaymentIconStyle(icon, received)
+        header.getChildAt(1)?.let { textColumn ->
+            setExactHeight(textColumn, scaledByCardWidth(card, 42f))
+            setPaymentMargins(
+                view = textColumn,
+                left = scaledByCardWidth(card, 11.4f),
+                top = scaledByCardWidth(card, 4.7f)
+            )
+            tunePaymentTextColumn(card, textColumn)
+        }
+    }
+
+    private fun setPaymentIconStyle(icon: View, received: Boolean) {
+        val image = icon as? ImageView ?: return
+        image.clearColorFilter()
+        image.imageAlpha = 255
+        image.setPadding(0, 0, 0, 0)
+        image.scaleType = ImageView.ScaleType.FIT_XY
+        image.setImageDrawable(TransferIconDrawable(received))
+    }
+
+    private fun tunePaymentFooter(card: View) {
+        if (card.width <= dp(card, 34f)) {
+            return
+        }
+        val footer = findViewByResourceName(card, "gbh") ?: return
+        setExactHeight(footer, scaledByCardWidth(card, transferReferenceFooterHeight))
+        findViewByResourceName(card, "a46")?.let {
+            setTopMargin(it, scaledByCardWidth(card, 16f))
+        }
+    }
+
+    private fun tunePaymentTextColumn(card: View, textColumn: View) {
+        (textColumn as? ViewGroup)?.getChildAt(0)?.let { innerColumn ->
+            setExactHeight(innerColumn, scaledByCardWidth(card, 42f))
+        }
+        setExactHeight(textColumn, scaledByCardWidth(card, 42f))
+        (findViewByResourceName(textColumn, "a48") as? TextView)?.let { amount ->
+            setExactHeight(amount, scaledByCardWidth(card, 18f))
+            amount.includeFontPadding = false
+            amount.gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        }
+        (findViewByResourceName(textColumn, "a44") as? TextView)?.let { status ->
+            setExactHeight(status, scaledByCardWidth(card, 17f))
+            setTopMargin(status, scaledByCardWidth(card, 4f))
+            status.includeFontPadding = true
+            status.maxLines = 1
+            status.gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        }
+    }
+
+    private fun tunePaymentDivider(card: View, dividerColor: Int, received: Boolean) {
+        val footer = findViewByResourceName(card, "gbh") ?: return
+        val divider = findViewByResourceName(footer, "d0v") ?: return
+        if (divider is ImageView) {
+            divider.setImageDrawable(null)
+            divider.clearColorFilter()
+        }
+        divider.alpha = 1f
+        divider.minimumHeight = 0
+        divider.setPadding(0, 0, 0, 0)
+        divider.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(dividerColor)
+        }
+        val params = divider.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        val outerInset = scaledByCardWidth(card, 17f)
+        val innerInset = scaledByCardWidth(card, 12.4f)
+        val leftInset = if (received) outerInset else innerInset
+        val rightInset = if (received) innerInset else outerInset
+        val width = card.width - leftInset - rightInset
+        var changed = false
+        if (width > 0 && params.width != width) {
+            params.width = width
+            changed = true
+        }
+        val height = scaledByCardWidth(card, 1f).coerceAtLeast(1)
+        if (params.height != height) {
+            params.height = height
+            changed = true
+        }
+        if (params.leftMargin != leftInset) {
+            params.leftMargin = leftInset
+            changed = true
+        }
+        if (params.rightMargin != rightInset) {
+            params.rightMargin = rightInset
+            changed = true
+        }
+        if (changed) {
+            divider.layoutParams = params
+            divider.requestLayout()
+        }
+    }
+
+    private fun setPaymentMargins(view: View, left: Int, top: Int) {
+        val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        var changed = false
+        if (params.leftMargin != left) {
+            params.leftMargin = left
+            changed = true
+        }
+        if (params.topMargin != top) {
+            params.topMargin = top
+            changed = true
+        }
+        if (changed) {
+            view.layoutParams = params
+            view.requestLayout()
+        }
+    }
+
+    private fun schedulePaymentMeasuredTune(card: View, dividerColor: Int, received: Boolean) {
+        if (XposedHelpers.getAdditionalInstanceField(card, keyPendingPaymentMeasuredTune) == true) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(card, keyPendingPaymentMeasuredTune, true)
+        card.post {
+            XposedHelpers.removeAdditionalInstanceField(card, keyPendingPaymentMeasuredTune)
+            if (card.width > dp(card, 34f) && card.visibility == View.VISIBLE) {
+                tunePaymentCard(card, dividerColor, received)
+            }
+        }
+    }
+
+    private fun scaledByCardWidth(card: View, referenceValue: Float): Int {
+        return (card.width * referenceValue / transferReferenceCardWidth + 0.5f).toInt()
+    }
+
+    private fun scaledByPositionCardWidth(card: View, referenceValue: Float): Int {
+        return (card.width * referenceValue / positionReferenceCardWidth + 0.5f).toInt()
+    }
+
+    private fun scaledByPositionCardHeight(card: View, referenceValue: Float): Int {
+        val height = card.height.takeIf { it > dp(card, 34f) }
+        if (height != null) {
+            return (height * referenceValue / positionReferenceCardHeight + 0.5f).toInt()
+        }
+        return scaledByPositionCardWidth(card, referenceValue)
+    }
+
+    private fun tuneRedpacketCard(target: BubbleTarget) {
+        val card = target.bubbleView
+        tuneDividerLines(card, horizontalInsetDp = 14f, dividerColor = 0x33FFFFFF)
+        target.namedViews["adsView"]?.let { hideRedpacketAdsView(it) }
+        target.namedViews["msgView"]?.let {
+            setTextColor(it, 0xFFFFFFFF.toInt(), 0xFFFFEBDD.toInt())
+        }
+        target.namedViews["msgView1"]?.let {
+            setTextColor(it, 0xFFFFEBDD.toInt(), 0xFFFFEBDD.toInt())
+        }
+        target.namedViews["titleView"]?.let {
+            setTextColor(it, 0xCCFFFFFF.toInt(), 0xCCFFFFFF.toInt())
+        }
+        target.namedViews["leftPicView"]?.let { tuneRedpacketIcon(it) }
+    }
+
+    private fun hideRedpacketAdsView(view: View) {
+        clearViewLayer(view)
+        view.alpha = 0f
+        view.visibility = View.GONE
+        view.minimumHeight = 0
+        val params = view.layoutParams ?: return
+        if (params.height != 0) {
+            params.height = 0
+            view.layoutParams = params
+        }
+    }
+
+    private fun tuneRedpacketIcon(view: View) {
+        if (view is ImageView) {
+            view.alpha = 0.95f
+            view.clearColorFilter()
+        }
+    }
+
+    private fun setPreviewPanelStyle(
+        card: View,
+        imageName: String,
+        desiredHeightDp: Float,
+        horizontalInsetDp: Float = 0f,
+        topMarginDp: Float = 0f,
+        bottomMarginDp: Float = 0f
+    ) {
+        val imageView = findViewByResourceName(card, imageName) as? ImageView ?: return
+        val panel = imageView.parent as? View ?: imageView
+        setExactHeight(panel, dp(card, desiredHeightDp))
+        setPanelMargins(
+            view = panel,
+            horizontalInset = dp(card, horizontalInsetDp),
+            topMargin = dp(card, topMarginDp),
+            bottomMargin = dp(card, bottomMarginDp)
+        )
+        if (panel !== imageView) {
+            setExactHeight(imageView, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        panel.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(0xFFF7F8F7.toInt())
+            setStroke(dp(card, 0.75f), 0x0F000000)
+            cornerRadius = dp(card, 12f).toFloat()
+        }
+        if (imageView.scaleType != ImageView.ScaleType.CENTER_CROP) {
+            imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        panel.minimumHeight = 0
+        clipRounded(panel, radiusDp = 12f)
+    }
+
+    private fun setExactHeight(view: View, height: Int) {
+        val params = view.layoutParams ?: return
+        if (params.height == height) {
+            return
+        }
+        params.height = height
+        view.layoutParams = params
+    }
+
+    private fun setExactSize(view: View, width: Int, height: Int) {
+        val params = view.layoutParams ?: return
+        var changed = false
+        if (params.width != width) {
+            params.width = width
+            changed = true
+        }
+        if (params.height != height) {
+            params.height = height
+            changed = true
+        }
+        if (changed) {
+            view.layoutParams = params
+            view.requestLayout()
+        }
+    }
+
+    private fun setLayoutHeight(view: View, height: Int) {
+        val params = view.layoutParams ?: return
+        if (params.height == height) {
+            return
+        }
+        params.height = height
+        view.layoutParams = params
+        view.requestLayout()
+    }
+
+    private fun setPanelMargins(
+        view: View,
+        horizontalInset: Int,
+        topMargin: Int,
+        bottomMargin: Int
+    ) {
+        val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        var changed = false
+        if (horizontalInset > 0) {
+            if (params.width != ViewGroup.LayoutParams.MATCH_PARENT) {
+                params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                changed = true
+            }
+            if (params.leftMargin != horizontalInset || params.rightMargin != horizontalInset) {
+                params.leftMargin = horizontalInset
+                params.rightMargin = horizontalInset
+                changed = true
+            }
+        }
+        if (params.topMargin != topMargin) {
+            params.topMargin = topMargin
+            changed = true
+        }
+        if (params.bottomMargin != bottomMargin) {
+            params.bottomMargin = bottomMargin
+            changed = true
+        }
+        if (changed) {
+            view.layoutParams = params
+        }
+    }
+
+    private fun setHorizontalMargins(
+        view: View,
+        left: Int,
+        right: Int,
+        forceMatchParent: Boolean = false
+    ) {
+        val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        var changed = false
+        if (forceMatchParent && params.width != ViewGroup.LayoutParams.MATCH_PARENT) {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT
+            changed = true
+        }
+        if (params.leftMargin != left) {
+            params.leftMargin = left
+            changed = true
+        }
+        if (params.rightMargin != right) {
+            params.rightMargin = right
+            changed = true
+        }
+        if (changed) {
+            view.layoutParams = params
+            view.requestLayout()
+        }
+    }
+
+    private fun setLeftMargin(view: View, left: Int) {
+        val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        if (params.leftMargin == left) {
+            return
+        }
+        params.leftMargin = left
+        view.layoutParams = params
+        view.requestLayout()
+    }
+
+    private fun setInsetWidthAndMargins(
+        view: View,
+        contentWidth: Int,
+        left: Int,
+        right: Int
+    ) {
+        if (contentWidth <= left + right) {
+            return
+        }
+        val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        var changed = false
+        val width = contentWidth - left - right
+        if (params.width != width) {
+            params.width = width
+            changed = true
+        }
+        if (params.leftMargin != left) {
+            params.leftMargin = left
+            changed = true
+        }
+        if (params.rightMargin != right) {
+            params.rightMargin = right
+            changed = true
+        }
+        if (changed) {
+            view.layoutParams = params
+            view.requestLayout()
+        }
+    }
+
+    private fun clipRounded(view: View, radiusDp: Float) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return
+        }
+        val radiusPx = dp(view, radiusDp).toFloat()
+        view.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(target: View, outline: Outline) {
+                if (target.width <= 0 || target.height <= 0) {
+                    return
+                }
+                outline.setRoundRect(0, 0, target.width, target.height, radiusPx)
+            }
+        }
+        view.clipToOutline = true
+    }
+
+    private fun setTextColorByName(root: View, name: String, color: Int) {
+        findViewByResourceName(root, name)?.let { setTextColor(it, color, color) }
+    }
+
+    private fun tuneDividerLines(
+        root: View,
+        horizontalInsetDp: Float,
+        dividerColor: Int = 0x0A000000
+    ) {
+        val cardWidth = root.width
+        if (cardWidth <= 0 || root.visibility != View.VISIBLE) {
+            return
+        }
+        val inset = dp(root, horizontalInsetDp)
+        fun visit(view: View, depth: Int) {
+            if (depth > 8 || view.visibility != View.VISIBLE) {
+                return
+            }
+            if (view !== root && isLikelyCardDivider(root, view, inset)) {
+                tuneCardDividerView(view, inset, dividerColor)
+            }
+            val group = view as? ViewGroup ?: return
+            for (index in 0 until group.childCount) {
+                visit(group.getChildAt(index), depth + 1)
+            }
+        }
+        visit(root, 0)
+    }
+
+    private fun findWideThinImageView(root: View): View? {
+        val rootWidth = root.width
+        if (rootWidth <= 0) {
+            return null
+        }
+        fun visit(view: View, depth: Int): View? {
+            if (depth > 8 || view.visibility != View.VISIBLE) {
+                return null
+            }
+            if (view is ImageView &&
+                view.width > rootWidth / 2 &&
+                view.height in 1..dp(root, 3f)
+            ) {
+                return view
+            }
+            val group = view as? ViewGroup ?: return null
+            for (index in 0 until group.childCount) {
+                visit(group.getChildAt(index), depth + 1)?.let { return it }
+            }
+            return null
+        }
+        return visit(root, 0)
+    }
+
+    private fun tuneCardDividerView(view: View, horizontalInset: Int, dividerColor: Int) {
+        if (view is ImageView) {
+            view.setImageDrawable(null)
+            view.clearColorFilter()
+        }
+        view.alpha = 1f
+        view.minimumHeight = 0
+        view.setPadding(0, 0, 0, 0)
+        view.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(dividerColor)
+        }
+        val params = view.layoutParams as? ViewGroup.MarginLayoutParams
+        if (params != null) {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT
+            params.height = 1
+            params.leftMargin = horizontalInset
+            params.rightMargin = horizontalInset
+            view.layoutParams = params
+        }
+    }
+
+    private fun tuneFixedCardDividerView(
+        view: View,
+        contentWidth: Int,
+        horizontalInset: Int,
+        dividerColor: Int,
+        dividerHeight: Int = 1
+    ) {
+        if (view is ImageView) {
+            view.setImageDrawable(null)
+            view.clearColorFilter()
+        }
+        view.alpha = 1f
+        view.minimumHeight = 0
+        view.setPadding(0, 0, 0, 0)
+        view.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(dividerColor)
+        }
+        val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        var changed = false
+        if (contentWidth <= horizontalInset * 2) {
+            return
+        }
+        val width = contentWidth - horizontalInset * 2
+        if (params.width != width) {
+            params.width = width
+            changed = true
+        }
+        val height = dividerHeight.coerceAtLeast(1)
+        if (params.height != height) {
+            params.height = height
+            changed = true
+        }
+        if (params.leftMargin != horizontalInset) {
+            params.leftMargin = horizontalInset
+            changed = true
+        }
+        if (params.rightMargin != horizontalInset) {
+            params.rightMargin = horizontalInset
+            changed = true
+        }
+        if (changed) {
+            view.layoutParams = params
+            view.requestLayout()
+        }
+    }
+
+    private fun isLikelyCardDivider(root: View, view: View, inset: Int): Boolean {
+        if (view is TextView || view.width <= inset * 4) {
+            return false
+        }
+        val maxDividerHeight = maxOf(2, dp(root, 1f))
+        return view.height in 1..maxDividerHeight &&
+                view.width >= root.width / 2
+    }
+
+    private fun deepestVisibleTextView(root: View, predicate: (String) -> Boolean): TextView? {
+        if (root.visibility != View.VISIBLE) {
+            return null
+        }
+        var result: TextView? = null
+        fun visit(view: View, depth: Int) {
+            if (depth > 8 || view.visibility != View.VISIBLE) {
+                return
+            }
+            if (view is TextView) {
+                val text = view.text?.toString()?.trim().orEmpty()
+                if (text.isNotBlank() && predicate(text)) {
+                    result = view
+                }
+            }
+            val group = view as? ViewGroup ?: return
+            for (index in 0 until group.childCount) {
+                visit(group.getChildAt(index), depth + 1)
+            }
+        }
+        visit(root, 0)
+        return result
+    }
+
+    private fun syncAvatarAndNicknameState(
+        itemView: View,
+        target: BubbleTarget,
+        state: ChatBubbleStylePolicy.RenderState
+    ) {
+        val avatarView = findViewByResourceName(itemView, resourceAvatar)
+        setAvatarVisibility(avatarView, state.showAvatar)
+        setNicknameVisibility(findNicknameView(itemView), state.showNickname)
+        resetAvatarPlacement(avatarView)
+        if (target.kind != "text" && state.showAvatar) {
+            alignVisibleAvatarToBubbleBottom(itemView, target.layoutView, state, schedule = true)
+        }
+    }
+
     private fun renderTextForSignature(target: BubbleTarget): String? {
         target.signatureText?.takeIf { it.isNotBlank() }?.let { return it }
         renderedText(target.textView)?.takeIf { it.isNotBlank() }?.let { return it }
@@ -560,14 +1552,31 @@ object ModernChatBubbleRenderer {
         avatarView ?: return
         val container = avatarView.parent as? View ?: avatarView
         val params = container.layoutParams
-        if (params != null && XposedHelpers.getAdditionalInstanceField(container, keyOriginalAvatarHeight) == null) {
-            XposedHelpers.setAdditionalInstanceField(container, keyOriginalAvatarHeight, maxOf(params.height, params.width))
+        if (params != null) {
+            val remembered = XposedHelpers.getAdditionalInstanceField(container, keyOriginalAvatarHeight) as? Int
+            val observedSize = maxOf(
+                params.height,
+                params.width,
+                container.height,
+                container.width,
+                avatarView.height,
+                avatarView.width,
+                dp(avatarView, 45f)
+            )
+            if (remembered == null || remembered <= 0) {
+                XposedHelpers.setAdditionalInstanceField(container, keyOriginalAvatarHeight, observedSize)
+            }
         }
         setAvatarRowGravity(container, visible)
         if (visible) {
-            val originalHeight = XposedHelpers.getAdditionalInstanceField(container, keyOriginalAvatarHeight) as? Int
-            if (params != null && originalHeight != null && params.height != originalHeight) {
+            val originalHeight = (XposedHelpers.getAdditionalInstanceField(container, keyOriginalAvatarHeight) as? Int)
+                ?.takeIf { it > 0 }
+                ?: dp(avatarView, 45f)
+            if (params != null && params.height != originalHeight) {
                 params.height = originalHeight
+                if (params.width == 0) {
+                    params.width = originalHeight
+                }
                 container.layoutParams = params
             }
             container.visibility = View.VISIBLE
@@ -602,6 +1611,7 @@ object ModernChatBubbleRenderer {
         findResourceSignalCardTarget(itemView)?.let { return it }
         findCallBubbleTarget(itemView)?.let { return it }
         findVoiceBubbleTarget(itemView)?.let { return it }
+        findRedpacketBubbleTargetByStructure(itemView)?.let { return it }
         val messageView = findViewByResourceName(itemView, resourceMessage)
         if (messageView != null) {
             return BubbleTarget(
@@ -617,6 +1627,42 @@ object ModernChatBubbleRenderer {
         } else {
             null
         }
+    }
+
+    private fun findRedpacketBubbleTargetByStructure(itemView: View): BubbleTarget? {
+        if (findViewByResourceName(itemView, resourceMessage) != null ||
+            findViewByResourceName(itemView, resourceVoiceBubble) != null ||
+            findViewByResourceName(itemView, resourceCallBubble) != null
+        ) {
+            return null
+        }
+        val sample = renderedTextDeep(itemView).orEmpty()
+        if (!ChatBubbleStylePolicy.hasRedpacketCardTextSignal(sample)) {
+            return null
+        }
+        val row = findViewByResourceName(itemView, "bkj") ?: itemView
+        val root = row as? ViewGroup ?: return null
+        val candidates = mutableListOf<RichCardCandidate>()
+        collectRichCardCandidates(
+            root = root,
+            itemView = itemView,
+            current = root,
+            depth = 0,
+            candidates = candidates
+        )
+        val candidate = candidates
+            .filter { ChatBubbleStylePolicy.hasRedpacketCardTextSignal(it.metrics.textSample) }
+            .maxByOrNull { it.score }
+            ?: return null
+        return BubbleTarget(
+            bubbleView = candidate.view,
+            textView = null,
+            kind = "redpacket",
+            applyTextPadding = false,
+            layoutView = candidate.view,
+            signatureText = candidate.metrics.textSample.ifBlank { sample.take(160) },
+            clipToOutline = true
+        )
     }
 
     private fun findVoiceBubbleTarget(itemView: View): BubbleTarget? {
@@ -769,6 +1815,13 @@ object ModernChatBubbleRenderer {
                 val root = if (clearKeysRoot == ClearKeysRoot.TARGET) target else itemView
                 ViewUtils.getChildView1(root, tree.treeStacks[key])
             }
+            val namedViews = mutableMapOf<String, View>()
+            tree.treeStacks.forEach { entry ->
+                try {
+                    ViewUtils.getChildView1(itemView, entry.value)?.let { namedViews[entry.key] = it }
+                } catch (_: Throwable) {
+                }
+            }
             val text = renderedTextDeep(target)
                 ?: target.contentDescription?.toString()
                 ?: kind
@@ -779,6 +1832,7 @@ object ModernChatBubbleRenderer {
                 applyTextPadding = false,
                 layoutView = target,
                 clearViews = clearViews,
+                namedViews = namedViews,
                 signatureText = text.ifBlank { kind },
                 clipToOutline = clipToOutline
             )
@@ -786,12 +1840,14 @@ object ModernChatBubbleRenderer {
 
         private fun classifyKind(fallback: String, text: String): String {
             return when {
+                fallback == "redpacket" -> "redpacket"
+                fallback == "mini-program" -> "mini-program"
                 text.contains("微信转账") ||
                         text.contains("转账") ||
                         text.contains("收款") ||
                         text.contains("¥") ||
                         text.contains("￥") -> classifyTransferKind(text)
-                text.contains("微信红包") || text.contains("红包") -> "redpacket"
+                ChatBubbleStylePolicy.hasRedpacketCardTextSignal(text) -> "redpacket"
                 text.contains("小程序") -> "mini-program"
                 text.contains("个人名片") || text.contains("名片") -> "contact-card"
                 else -> fallback
@@ -872,8 +1928,8 @@ object ModernChatBubbleRenderer {
     ): String {
         return when {
             hasTransferSignals -> classifyTransferKind(text)
-            text.contains("微信红包") || text.contains("红包") -> "redpacket"
             hasMiniProgramSignals || text.contains("小程序") -> "mini-program"
+            ChatBubbleStylePolicy.hasRedpacketCardTextSignal(text) -> "redpacket"
             text.contains("个人名片") || text.contains("名片") -> "contact-card"
             hasWebShareSignals -> "rich-card"
             else -> "rich-card"
@@ -1130,7 +2186,7 @@ object ModernChatBubbleRenderer {
                     text.contains("收款") ||
                     text.contains("¥") ||
                     text.contains("￥") -> classifyTransferKind(text)
-            text.contains("微信红包") || text.contains("红包") -> "redpacket"
+            ChatBubbleStylePolicy.hasRedpacketCardTextSignal(text) -> "redpacket"
             text.contains("小程序") -> "mini-program"
             text.contains("个人名片") || text.contains("名片") -> "contact-card"
             else -> "rich-card"
@@ -1138,11 +2194,12 @@ object ModernChatBubbleRenderer {
     }
 
     private fun hasRichCardTextMarker(text: String): Boolean {
+        if (ChatBubbleStylePolicy.hasRedpacketCardTextSignal(text)) {
+            return true
+        }
         return listOf(
             "微信转账",
             "转账",
-            "微信红包",
-            "红包",
             "小程序",
             "个人名片",
             "名片",
@@ -1411,22 +2468,57 @@ object ModernChatBubbleRenderer {
     }
 
     private fun adjacentVisibleItem(itemView: View, step: Int, requireMessage: Boolean): View? {
-        val parent = itemView.parent as? ViewGroup ?: return null
-        val index = parent.indexOfChild(itemView)
-        if (index < 0) {
-            return null
-        }
-        var cursor = index + step
-        while (cursor in 0 until parent.childCount) {
-            val child = parent.getChildAt(cursor)
-            if (resourceName(child) == resourceItemRoot &&
-                (!requireMessage || hasBubbleTarget(child))
-            ) {
-                return child
+        val parent = findRecyclerParent(itemView) ?: itemView.parent as? ViewGroup ?: return null
+        val currentTop = screenTop(itemView)
+        var bestChild: View? = null
+        var bestTop = if (step > 0) Int.MAX_VALUE else Int.MIN_VALUE
+        for (index in 0 until parent.childCount) {
+            val child = parent.getChildAt(index)
+            val candidate = findItemRoot(child) ?: child
+            if (candidate === itemView || resourceName(candidate) != resourceItemRoot) {
+                continue
             }
-            cursor += step
+            if (requireMessage && !hasBubbleTarget(candidate)) {
+                continue
+            }
+            val childTop = screenTop(candidate)
+            if (step > 0) {
+                if (childTop > currentTop && childTop < bestTop) {
+                    bestTop = childTop
+                    bestChild = candidate
+                }
+            } else if (step < 0) {
+                if (childTop < currentTop && childTop > bestTop) {
+                    bestTop = childTop
+                    bestChild = candidate
+                }
+            }
+        }
+        return bestChild
+    }
+
+    private fun findRecyclerParent(view: View): ViewGroup? {
+        var current = view.parent
+        var depth = 0
+        while (current is ViewGroup && depth < 12) {
+            if (isRecyclerViewLike(current)) {
+                return current
+            }
+            current = current.parent
+            depth++
         }
         return null
+    }
+
+    private fun isRecyclerViewLike(view: View): Boolean {
+        val name = view.javaClass.name
+        return name.contains("RecyclerView") || name.contains("WxRecyclerView")
+    }
+
+    private fun screenTop(view: View): Int {
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        return location[1]
     }
 
     private fun hasVisibleTimeSeparator(itemView: View): Boolean {
@@ -1490,8 +2582,7 @@ object ModernChatBubbleRenderer {
         state: ChatBubbleStylePolicy.RenderState
     ) {
         syncMessageParentTopMargin(itemView, target.layoutView, state)
-        setAvatarVisibility(findViewByResourceName(itemView, resourceAvatar), state.showAvatar)
-        setNicknameVisibility(findNicknameView(itemView), state.showNickname)
+        syncAvatarAndNicknameState(itemView, target, state)
     }
 
     private fun syncMessageParentTopMargin(
@@ -1525,6 +2616,79 @@ object ModernChatBubbleRenderer {
         container.layoutParams = params
     }
 
+    private fun resetAvatarPlacement(avatarView: View?) {
+        avatarView ?: return
+        val container = avatarView.parent as? View ?: avatarView
+        if (container.translationY != 0f) {
+            container.translationY = 0f
+        }
+        val params = container.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        if (params.topMargin == 0 && params.bottomMargin == 0) {
+            return
+        }
+        params.topMargin = 0
+        params.bottomMargin = 0
+        container.layoutParams = params
+    }
+
+    private fun alignVisibleAvatarToBubbleBottom(
+        itemView: View,
+        bubbleView: View,
+        state: ChatBubbleStylePolicy.RenderState,
+        schedule: Boolean
+    ) {
+        if (!state.showAvatar) {
+            return
+        }
+        alignVisibleAvatarToBubbleBottomNow(itemView, bubbleView)
+    }
+
+    private fun alignVisibleAvatarToBubbleBottomNow(itemView: View, bubbleView: View) {
+        val avatarView = findViewByResourceName(itemView, resourceAvatar) ?: return
+        val container = avatarView.parent as? View ?: avatarView
+        if (container.visibility != View.VISIBLE || avatarView.visibility != View.VISIBLE) {
+            return
+        }
+        val parent = container.parent as? ViewGroup ?: return
+        if (!containsView(parent, bubbleView)) {
+            return
+        }
+        val bubbleBottom = bottomRelativeTo(parent, bubbleView)
+        val avatarHeight = maxOf(container.height, avatarView.height, dp(avatarView, 45f))
+        if (bubbleBottom <= 0 || avatarHeight <= 0) {
+            return
+        }
+        val desiredTop = (bubbleBottom - avatarHeight).coerceAtLeast(0)
+        val currentTop = topRelativeTo(parent, container)
+        val translation = (desiredTop - currentTop).toFloat()
+        if (container.translationY == translation) {
+            return
+        }
+        container.translationY = translation
+    }
+
+    private fun topRelativeTo(ancestor: View, child: View?): Int {
+        child ?: return 0
+        var current: View? = child
+        var top = 0
+        var depth = 0
+        while (current != null && current !== ancestor && depth < 12) {
+            top += current.top
+            current = current.parent as? View
+            depth++
+        }
+        return if (current === ancestor) top else 0
+    }
+
+    private fun bottomRelativeTo(ancestor: View, child: View?): Int {
+        child ?: return 0
+        val height = child.height.takeIf { it > 0 } ?: child.measuredHeight
+        if (height <= 0 || child.visibility == View.GONE) {
+            return 0
+        }
+        return topRelativeTo(ancestor, child) + height
+    }
+
     private fun renderSignature(
         state: ChatBubbleStylePolicy.RenderState,
         text: String,
@@ -1546,8 +2710,9 @@ object ModernChatBubbleRenderer {
                 semanticTextColor = 0xFFFFF2DE.toInt(),
                 quoteFillColor = 0x26FFFFFF,
                 quoteTextColor = 0xE6FFFFFF.toInt(),
-                strokeColor = ChatBubbleStylePolicy.TRANSPARENT_COLOR,
-                strokeWidthDp = 0f
+                strokeColor = 0x00FFFFFF,
+                strokeWidthDp = 0f,
+                useGradient = false
             )
             "transfer-received" -> base.copy(
                 bubbleColor = 0xFFFBE3C5.toInt(),
@@ -1556,8 +2721,9 @@ object ModernChatBubbleRenderer {
                 semanticTextColor = 0xFFE0852A.toInt(),
                 quoteFillColor = 0x33F39B3B,
                 quoteTextColor = 0xFFE0852A.toInt(),
-                strokeColor = ChatBubbleStylePolicy.TRANSPARENT_COLOR,
-                strokeWidthDp = 0f
+                strokeColor = 0x00FFFFFF,
+                strokeWidthDp = 0f,
+                useGradient = false
             )
             "redpacket" -> base.copy(
                 bubbleColor = 0xFFE86D36.toInt(),
@@ -1566,13 +2732,14 @@ object ModernChatBubbleRenderer {
                 semanticTextColor = 0xFFFFEBDD.toInt(),
                 quoteFillColor = 0x26FFFFFF,
                 quoteTextColor = 0xE6FFFFFF.toInt(),
-                strokeColor = ChatBubbleStylePolicy.TRANSPARENT_COLOR,
-                strokeWidthDp = 0f
+                strokeColor = 0x33FFFFFF,
+                strokeWidthDp = 1f
             )
             "contact-card",
             "position",
             "mini-program",
             "rich-card" -> ChatBubbleStylePolicy.cardPalette()
+            "image" -> ChatBubbleStylePolicy.imagePalette()
             else -> base
         }
     }
@@ -1631,5 +2798,93 @@ object ModernChatBubbleRenderer {
             container.visibility == View.INVISIBLE && avatarView.visibility == View.INVISIBLE &&
                     (container.layoutParams?.height ?: 0) == 0
         }
+    }
+
+    private class TransferIconDrawable(
+        private val received: Boolean
+    ) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var drawableAlpha = 255
+
+        override fun draw(canvas: Canvas) {
+            val bounds = bounds
+            val size = minOf(bounds.width(), bounds.height()).toFloat()
+            if (size <= 0f) {
+                return
+            }
+            val cx = bounds.left + bounds.width() / 2f
+            val cy = bounds.top + bounds.height() / 2f
+            val radius = size / 2f
+            val fillColor = if (received) 0xFFF9D5A6.toInt() else 0xFFF5AF62.toInt()
+            val markColor = if (received) 0xFFE0852A.toInt() else 0xFFFFFFFF.toInt()
+
+            paint.style = Paint.Style.FILL
+            paint.color = withAlpha(fillColor)
+            canvas.drawCircle(cx, cy, radius, paint)
+
+            paint.style = Paint.Style.STROKE
+            paint.strokeCap = Paint.Cap.ROUND
+            paint.strokeJoin = Paint.Join.ROUND
+            paint.strokeWidth = size * 0.075f
+            paint.color = withAlpha(markColor)
+
+            if (received) {
+                drawCheck(canvas, cx, cy, size)
+            } else {
+                drawTransferArrows(canvas, cx, cy, size)
+            }
+        }
+
+        private fun drawTransferArrows(canvas: Canvas, cx: Float, cy: Float, size: Float) {
+            val head = size * 0.11f
+            val topY = cy - size * 0.10f
+            val topStart = cx - size * 0.20f
+            val topEnd = cx + size * 0.16f
+            canvas.drawLine(topStart, topY, topEnd, topY, paint)
+            canvas.drawLine(topEnd, topY, topEnd - head, topY - head, paint)
+            canvas.drawLine(topEnd, topY, topEnd - head, topY + head, paint)
+
+            val bottomY = cy + size * 0.12f
+            val bottomStart = cx + size * 0.20f
+            val bottomEnd = cx - size * 0.16f
+            canvas.drawLine(bottomStart, bottomY, bottomEnd, bottomY, paint)
+            canvas.drawLine(bottomEnd, bottomY, bottomEnd + head, bottomY - head, paint)
+            canvas.drawLine(bottomEnd, bottomY, bottomEnd + head, bottomY + head, paint)
+        }
+
+        private fun drawCheck(canvas: Canvas, cx: Float, cy: Float, size: Float) {
+            val path = Path().apply {
+                moveTo(cx - size * 0.24f, cy + size * 0.02f)
+                lineTo(cx - size * 0.07f, cy + size * 0.20f)
+                lineTo(cx + size * 0.27f, cy - size * 0.17f)
+            }
+            canvas.drawPath(path, paint)
+        }
+
+        private fun withAlpha(color: Int): Int {
+            return Color.argb(
+                Color.alpha(color) * drawableAlpha / 255,
+                Color.red(color),
+                Color.green(color),
+                Color.blue(color)
+            )
+        }
+
+        override fun setAlpha(alpha: Int) {
+            drawableAlpha = alpha.coerceIn(0, 255)
+            invalidateSelf()
+        }
+
+        override fun setColorFilter(colorFilter: ColorFilter?) {
+            paint.colorFilter = colorFilter
+            invalidateSelf()
+        }
+
+        @Suppress("DEPRECATION")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+        override fun getIntrinsicWidth(): Int = 100
+
+        override fun getIntrinsicHeight(): Int = 100
     }
 }

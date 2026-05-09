@@ -3,6 +3,7 @@ package com.blanke.mdwechat.util
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -96,6 +97,26 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
+    fun visibleBoundaryRemovesNextMembershipOnly() {
+        assertEquals(
+            ChatBubbleStylePolicy.GroupPosition.SINGLE,
+            ChatBubbleStylePolicy.positionWithoutNext(ChatBubbleStylePolicy.GroupPosition.TOP)
+        )
+        assertEquals(
+            ChatBubbleStylePolicy.GroupPosition.BOTTOM,
+            ChatBubbleStylePolicy.positionWithoutNext(ChatBubbleStylePolicy.GroupPosition.MIDDLE)
+        )
+        assertEquals(
+            ChatBubbleStylePolicy.GroupPosition.BOTTOM,
+            ChatBubbleStylePolicy.positionWithoutNext(ChatBubbleStylePolicy.GroupPosition.BOTTOM)
+        )
+        assertEquals(
+            ChatBubbleStylePolicy.GroupPosition.SINGLE,
+            ChatBubbleStylePolicy.positionWithoutNext(ChatBubbleStylePolicy.GroupPosition.SINGLE)
+        )
+    }
+
+    @Test
     fun avatarAndNicknameVisibilityFollowClusterEdges() {
         assertTrue(ChatBubbleStylePolicy.showAvatar(ChatBubbleStylePolicy.GroupPosition.SINGLE))
         assertFalse(ChatBubbleStylePolicy.showAvatar(ChatBubbleStylePolicy.GroupPosition.TOP))
@@ -106,6 +127,19 @@ class ChatBubbleStylePolicyTest {
         assertTrue(ChatBubbleStylePolicy.showNickname(ChatBubbleStylePolicy.GroupPosition.TOP))
         assertFalse(ChatBubbleStylePolicy.showNickname(ChatBubbleStylePolicy.GroupPosition.MIDDLE))
         assertFalse(ChatBubbleStylePolicy.showNickname(ChatBubbleStylePolicy.GroupPosition.BOTTOM))
+
+        assertTrue(
+            ChatBubbleStylePolicy.showNickname(
+                ChatBubbleStylePolicy.Side.LEFT,
+                ChatBubbleStylePolicy.GroupPosition.SINGLE
+            )
+        )
+        assertFalse(
+            ChatBubbleStylePolicy.showNickname(
+                ChatBubbleStylePolicy.Side.RIGHT,
+                ChatBubbleStylePolicy.GroupPosition.SINGLE
+            )
+        )
     }
 
     @Test
@@ -202,8 +236,17 @@ class ChatBubbleStylePolicyTest {
 
         assertEquals(0xFFFFFFFF.toInt(), palette.bubbleColor)
         assertEquals(ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR, palette.textColor)
-        assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, palette.strokeColor)
-        assertEquals(0f, palette.strokeWidthDp, 0f)
+        assertEquals(0x52FFFFFF, palette.strokeColor)
+        assertEquals(0.75f, palette.strokeWidthDp, 0f)
+    }
+
+    @Test
+    fun imagePaletteUsesNeutralSurfaceInsteadOfSideTint() {
+        val palette = ChatBubbleStylePolicy.imagePalette()
+
+        assertEquals(0xFFFFFFFF.toInt(), palette.bubbleColor)
+        assertEquals(0x14000000, palette.strokeColor)
+        assertEquals(0.75f, palette.strokeWidthDp, 0f)
     }
 
     @Test
@@ -318,6 +361,49 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
+    fun groupChatMessagesDoNotUseChatroomIdAsSenderFallback() {
+        assertEquals(
+            "wxid_alice",
+            ChatBubbleStylePolicy.senderKeyForGrouping(
+                ChatBubbleStylePolicy.Side.LEFT,
+                "demo@chatroom",
+                "wxid_alice:\n<voicemsg />"
+            )
+        )
+        assertNull(
+            ChatBubbleStylePolicy.senderKeyForGrouping(
+                ChatBubbleStylePolicy.Side.LEFT,
+                "demo@chatroom",
+                "<voicemsg />"
+            )
+        )
+        assertEquals(
+            "wxid_friend",
+            ChatBubbleStylePolicy.senderKeyForGrouping(
+                ChatBubbleStylePolicy.Side.LEFT,
+                "wxid_friend",
+                "<voicemsg />"
+            )
+        )
+        assertEquals(
+            "wxid_friend",
+            ChatBubbleStylePolicy.senderKeyForGrouping(
+                ChatBubbleStylePolicy.Side.LEFT,
+                "wxid_friend",
+                "title:\nplain direct chat text"
+            )
+        )
+        assertEquals(
+            "self",
+            ChatBubbleStylePolicy.senderKeyForGrouping(
+                ChatBubbleStylePolicy.Side.RIGHT,
+                "demo@chatroom",
+                "<voicemsg />"
+            )
+        )
+    }
+
+    @Test
     fun rightMessagesGroupBySideButStopAtNonTextOrOppositeSide() {
         val right = ChatBubbleStylePolicy.MessageCandidate(
             isTextMessage = true,
@@ -333,6 +419,55 @@ class ChatBubbleStylePolicyTest {
             )
         )
         assertFalse(ChatBubbleStylePolicy.canGroupWith(right, right.copy(isTextMessage = false)))
+    }
+
+    @Test
+    fun visibleTimeSeparatorStopsVoiceBeforeFollowingCallAndKeepsNextGroupTogether() {
+        val rows = listOf(
+            row(
+                stableKey = "voice14",
+                side = ChatBubbleStylePolicy.Side.LEFT,
+                senderKey = "alice",
+                createTimeMs = 1_000L,
+                text = "<voicemsg />",
+                groupKey = "voice"
+            ),
+            row(
+                stableKey = "voice2",
+                side = ChatBubbleStylePolicy.Side.LEFT,
+                senderKey = "alice",
+                createTimeMs = 2_000L,
+                text = "<voicemsg />",
+                groupKey = "voice"
+            ),
+            row(
+                stableKey = "call",
+                side = ChatBubbleStylePolicy.Side.LEFT,
+                senderKey = "alice",
+                createTimeMs = 3_000L,
+                text = "已在其它设备拒绝",
+                hasTimeSeparatorBefore = true,
+                groupKey = "call"
+            ),
+            row(
+                stableKey = "voice5",
+                side = ChatBubbleStylePolicy.Side.LEFT,
+                senderKey = "alice",
+                createTimeMs = 4_000L,
+                text = "<voicemsg />",
+                groupKey = "voice"
+            )
+        )
+
+        val states = ChatBubbleStylePolicy.resolveRenderStates(rows)
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("voice14").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("voice2").position)
+        assertTrue(states.getValue("voice2").showAvatar)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("call").position)
+        assertFalse(states.getValue("call").showAvatar)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("voice5").position)
+        assertTrue(states.getValue("voice5").showAvatar)
     }
 
     @Test
@@ -480,6 +615,19 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
+    fun redpacketCardTextSignalRequiresCardSpecificWording() {
+        assertTrue(ChatBubbleStylePolicy.hasRedpacketCardTextSignal("微信红包"))
+        assertTrue(ChatBubbleStylePolicy.hasRedpacketCardTextSignal("恭喜发财，大吉大利"))
+        assertTrue(ChatBubbleStylePolicy.hasRedpacketCardTextSignal("红包 已领取"))
+        assertTrue(ChatBubbleStylePolicy.hasRedpacketCardTextSignal("红包 已过期"))
+
+        assertFalse(ChatBubbleStylePolicy.hasRedpacketCardTextSignal("红包啊"))
+        assertFalse(ChatBubbleStylePolicy.hasRedpacketCardTextSignal("取出来搞点红包，意思意思"))
+        assertFalse(ChatBubbleStylePolicy.hasRedpacketCardTextSignal("一起拆红包，快来！"))
+        assertFalse(ChatBubbleStylePolicy.hasRedpacketCardTextSignal(""))
+    }
+
+    @Test
     fun richCardRowsParticipateInMessageGrouping() {
         val states = ChatBubbleStylePolicy.resolveRenderStates(
             listOf(
@@ -492,6 +640,19 @@ class ChatBubbleStylePolicyTest {
         assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("link").position)
         assertEquals(ChatBubbleStylePolicy.GroupPosition.MIDDLE, states.getValue("text").position)
         assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("transfer").position)
+    }
+
+    @Test
+    fun redpacketRowsParticipateInMessageGrouping() {
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(
+                row("text", ChatBubbleStylePolicy.Side.LEFT, "alice", 1_000L, "ok", isTextMessage = true),
+                row("redpacket", ChatBubbleStylePolicy.Side.LEFT, "alice", 2_000L, "微信红包", isTextMessage = true)
+            )
+        )
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("text").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("redpacket").position)
     }
 
     @Test
@@ -539,13 +700,30 @@ class ChatBubbleStylePolicyTest {
         assertTrue(states.getValue("2").showAvatar)
     }
 
+    @Test
+    fun rightSideRenderStatesNeverShowNickname() {
+        val rows = listOf(
+            row("1", ChatBubbleStylePolicy.Side.RIGHT, "self", 1_000L, "a"),
+            row("2", ChatBubbleStylePolicy.Side.RIGHT, "self", 2_000L, "b")
+        )
+
+        val states = ChatBubbleStylePolicy.resolveRenderStates(rows)
+
+        assertFalse(states.getValue("1").showNickname)
+        assertFalse(states.getValue("2").showNickname)
+        assertFalse(states.getValue("1").showAvatar)
+        assertTrue(states.getValue("2").showAvatar)
+    }
+
     private fun row(
         stableKey: String,
         side: ChatBubbleStylePolicy.Side,
         senderKey: String?,
         createTimeMs: Long,
         text: String,
-        isTextMessage: Boolean = true
+        isTextMessage: Boolean = true,
+        hasTimeSeparatorBefore: Boolean = false,
+        groupKey: String? = null
     ): ChatBubbleStylePolicy.MessageRow {
         return ChatBubbleStylePolicy.MessageRow(
             stableKey = stableKey,
@@ -553,7 +731,9 @@ class ChatBubbleStylePolicyTest {
             side = side,
             senderKey = senderKey,
             createTimeMs = createTimeMs,
-            contentText = text
+            contentText = text,
+            hasTimeSeparatorBefore = hasTimeSeparatorBefore,
+            groupKey = groupKey
         )
     }
 

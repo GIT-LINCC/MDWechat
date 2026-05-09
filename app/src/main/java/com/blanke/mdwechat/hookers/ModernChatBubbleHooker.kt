@@ -547,7 +547,7 @@ object ModernChatBubbleHooker : HookerProvider {
                         "hookBind method=${method.name} adapter=${adapter.javaClass.name} " +
                                 "pos=$position applied=$applied recycler=${recycler?.javaClass?.name}"
                     )
-                    if (applied && recycler != null) {
+                    if (applied && recycler != null && enableVisibleWindowApply) {
                         scheduleRecyclerVisibleApply(recycler, "bind:${method.name}")
                     }
                 }
@@ -723,7 +723,7 @@ object ModernChatBubbleHooker : HookerProvider {
         val position = getChildAdapterPosition(parent, child)
         if (position >= 0) {
             val applied = ModernChatBubbleRenderer.applyFromAdapterBind(adapter, position, child)
-            if (applied) {
+            if (applied && enableVisibleWindowApply) {
                 scheduleRecyclerVisibleApply(parent, "child")
             }
             if (!applied && enableVisibleWindowApply) {
@@ -744,7 +744,9 @@ object ModernChatBubbleHooker : HookerProvider {
         hookConcreteAdapter(adapter.javaClass)
         rememberRecyclerForAdapter(adapter, recycler)
         probeRecyclerAdapter(recycler, adapter, source)
-        scheduleRecyclerVisibleApply(recycler, "$source.posted")
+        if (enableVisibleWindowApply) {
+            scheduleRecyclerVisibleApply(recycler, "$source.posted")
+        }
     }
 
     private fun scheduleRecyclerVisibleApply(recycler: ViewGroup, source: String) {
@@ -813,6 +815,9 @@ object ModernChatBubbleHooker : HookerProvider {
 
     private fun scheduleKnownRecyclerVisibleApply(adapter: Any, source: String) {
         ModernChatBubbleStyler.invalidateAdapterData(adapter)
+        if (!enableVisibleWindowApply) {
+            return
+        }
         val recyclers = synchronized(adapterRecyclers) {
             adapterRecyclers[adapter]?.toList().orEmpty()
         }

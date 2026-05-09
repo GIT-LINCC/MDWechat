@@ -1,8 +1,13 @@
 package com.blanke.mdwechat.hookers
 
 import android.content.res.ColorStateList
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PorterDuff
+import android.graphics.RectF
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
@@ -23,6 +28,7 @@ import com.blanke.mdwechat.util.ChatBubbleStylePolicy
 import com.blanke.mdwechat.util.ContactPageStyleResolver
 import com.blanke.mdwechat.util.ColorUtils
 import com.blanke.mdwechat.util.ConversationRipplePolicy
+import com.blanke.mdwechat.util.ImageHelper
 import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.MainPageRippleGesturePolicy
 import com.blanke.mdwechat.util.MainPageRipplePolicy
@@ -32,7 +38,6 @@ import com.blanke.mdwechat.util.SettingsHeaderStyleResolver
 import com.blanke.mdwechat.util.ViewTreeUtils
 import com.blanke.mdwechat.util.ViewUtils
 import com.blanke.mdwechat.util.waitInvoke
-import com.gcssloop.widget.RCRelativeLayout
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -52,10 +57,23 @@ object ListViewHooker : HookerProvider {
     private const val keyMainPageActiveTarget = "mdwechat_main_page_active_target"
     private const val keyMainPageListInteraction = "mdwechat_main_page_list_interaction"
     private const val keyMainPageListResetRunnable = "mdwechat_main_page_list_reset_runnable"
+    private const val keyContactHeaderIconCircleApplied = "mdwechat_contact_header_icon_circle_applied"
     private const val absListViewTouchModeRest = -1
     private const val absListViewInvalidPosition = -1
     private val conversationPressedState = intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed)
     private val conversationEnabledState = intArrayOf(android.R.attr.state_enabled)
+    private val contactHeaderIconContainerNames = setOf("ajy", "n8", "g9q")
+    private val modernChatBubbleRowSignals = setOf(
+        "bkl",
+        "brp",
+        "bkg",
+        "big",
+        "bp5",
+        "bpv",
+        "bjr",
+        "bjs",
+        "biq"
+    )
 
     private val titleTextColor: Int
         get() {
@@ -211,6 +229,36 @@ object ListViewHooker : HookerProvider {
             }
         }
         return collector
+    }
+
+    private fun tryApplyModernChatBubble(adapter: Any?, position: Int, view: View): Boolean {
+        if (adapter == null || position < 0 || !isLikelyChatMessageRow(view)) {
+            return false
+        }
+        return try {
+            ModernChatBubbleRenderer.applyFromAdapterBind(adapter, position, view)
+        } catch (throwable: Throwable) {
+            LogUtil.log("ListViewHooker modern chat bubble apply failed: ${throwable.javaClass.simpleName}")
+            false
+        }
+    }
+
+    private fun isLikelyChatMessageRow(view: View): Boolean {
+        val names = collectViewResourceNames(view)
+        if ("bn1" !in names) {
+            return false
+        }
+        return names.any { it in modernChatBubbleRowSignals }
+    }
+
+    private fun applyModernChatLabelColors(view: View) {
+        if (!HookConfig.is_hook_chat_label_color) {
+            return
+        }
+        val color = HookConfig.chat_label_color
+        listOf("br1", "brc").forEach { name ->
+            (findDescendantViewByResourceName(view, name) as? TextView)?.setTextColor(color)
+        }
     }
 
     private fun clearContactPageContainerBackgrounds(root: View) {
@@ -776,6 +824,11 @@ object ListViewHooker : HookerProvider {
 
                     // 按照使用频率重排序
                     val hookBubbles: Boolean = ((!NightModeUtils.isNightMode()) || HookConfig.is_hook_bubble_in_night_mode) && HookConfig.is_hook_chat_settings
+                    if (hookBubbles && tryApplyModernChatBubble(adapter, position, view)) {
+                        applyModernChatLabelColors(view)
+                        prepareReusableItemView(view)
+                        return
+                    }
                     //气泡
                     // 聊天消息 item
                     if (ViewTreeUtils.equals(VTTV.ChatRightMessageItem.item, view)) {
@@ -1428,11 +1481,6 @@ object ListViewHooker : HookerProvider {
                                 val adsView = ViewUtils.getChildView1(view, this) as FrameLayout
                                 adsView.visibility = View.GONE
                             }
-                            // 左侧图标
-                            VTTV.ChatLeftRedPacketItem.treeStacks["leftPicView"]?.apply {
-                                val leftPicView = ViewUtils.getChildView1(view, this) as ImageView
-                                leftPicView.setImageDrawable(null)
-                            }
                         }
                     }
                     // 右红包
@@ -1481,11 +1529,6 @@ object ListViewHooker : HookerProvider {
                             VTTV.ChatRightRedPacketItem.treeStacks["adsView"]?.apply {
                                 val adsView = ViewUtils.getChildView1(view, this) as FrameLayout
                                 adsView.visibility = View.GONE
-                            }
-                            // 左侧图标
-                            VTTV.ChatRightRedPacketItem.treeStacks["leftPicView"]?.apply {
-                                val leftPicView = ViewUtils.getChildView1(view, this) as ImageView
-                                leftPicView.setImageDrawable(null)
                             }
                         }
                     }
@@ -2060,6 +2103,7 @@ object ListViewHooker : HookerProvider {
                     //region 企业联系人
                     if (ViewTreeUtils.equals(VTTV.ContactWorkContactsItem.item, contactContentsItem)) {
                         LogUtil.logOnlyOnce("ListViewHooker.ContactWorkContactsItem")
+                        applyContactHeaderEntryIconClip(findContactHeaderEntryIconContainer(contactContentsItem))
                         if (isHookTextColor) {
                             val headTextView = ViewUtils.getChildView1(contactContentsItem, VTTV.ContactWorkContactsItem.treeStacks["headTextView"]) as TextView
                             headTextView.setTextColor(titleTextColor)
@@ -2144,20 +2188,7 @@ object ListViewHooker : HookerProvider {
                             titleTextView = ViewUtils.getChildView(childView, 0, 0, 0, 1)
                             ViewUtils.getChildView(childView, 0, 0)?.background = drawableTransparent
                         }
-                        if (
-                                ContactPageStyleResolver.shouldWrapHeaderEntryIcon(WechatGlobal.wxVersion)
-                                && maskLayout != null
-                                && maskLayout is ViewGroup
-                        ) {
-                            val iv = maskLayout.getChildAt(0)
-                            if (iv is ImageView) {
-                                val roundLayout = RCRelativeLayout(Objects.Main.LauncherUI!!)
-                                roundLayout.isRoundAsCircle = true
-                                maskLayout.addView(roundLayout, iv.layoutParams)
-                                maskLayout.removeView(iv)
-                                roundLayout.addView(iv)
-                            }
-                        }
+                        applyContactHeaderEntryIconClip(maskLayout)
                         if (titleTextView != null) {
                             titleTextView.background = drawableTransparent
                             if (isHookTextColor) {
@@ -2177,6 +2208,123 @@ object ListViewHooker : HookerProvider {
                 }
             }
         }
+    }
+
+    private fun applyContactHeaderEntryIconClip(maskLayout: View?) {
+        if (
+                !HookConfig.is_hook_avatar
+                || !ContactPageStyleResolver.shouldWrapHeaderEntryIcon(WechatGlobal.wxVersion)
+                || maskLayout == null
+        ) {
+            return
+        }
+        if (maskLayout !is ViewGroup) {
+            return
+        }
+        applyContactHeaderIconCircle(maskLayout)
+        maskLayout.post {
+            applyContactHeaderIconCircle(maskLayout)
+        }
+        maskLayout.postDelayed({
+            applyContactHeaderIconCircle(maskLayout)
+        }, 120L)
+    }
+
+    private fun applyContactHeaderIconCircle(maskLayout: ViewGroup): Boolean {
+        if (XposedHelpers.getAdditionalInstanceField(maskLayout, keyContactHeaderIconCircleApplied) == true) {
+            return true
+        }
+        val bitmap = createContactHeaderCircleBitmap(maskLayout) ?: return false
+        maskLayout.background = BitmapDrawable(maskLayout.resources, bitmap)
+        hideContactHeaderIconChildren(maskLayout)
+        maskLayout.setWillNotDraw(false)
+        maskLayout.invalidate()
+        XposedHelpers.setAdditionalInstanceField(maskLayout, keyContactHeaderIconCircleApplied, true)
+        return true
+    }
+
+    private fun createContactHeaderCircleBitmap(maskLayout: ViewGroup): Bitmap? {
+        val width = maskLayout.width
+        val height = maskLayout.height
+        if (width <= 0 || height <= 0) {
+            return null
+        }
+        return try {
+            val contentView = findDescendantViewByResourceName(maskLayout, "cgi")
+                    ?: if (maskLayout.childCount > 0) maskLayout.getChildAt(0) else null
+                    ?: return null
+            if (contentView.width <= 0 || contentView.height <= 0) {
+                return null
+            }
+
+            val contentBitmap = Bitmap.createBitmap(contentView.width, contentView.height, Bitmap.Config.ARGB_8888)
+            Canvas(contentBitmap).apply {
+                contentView.draw(this)
+            }
+
+            val circleBitmap = Bitmap.createBitmap(contentBitmap.width, contentBitmap.height, Bitmap.Config.ARGB_8888)
+            val circleCanvas = Canvas(circleBitmap)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+            paint.color = resolveContactHeaderIconFillColor(contentBitmap)
+            circleCanvas.drawOval(RectF(0f, 0f, contentBitmap.width.toFloat(), contentBitmap.height.toFloat()), paint)
+            circleCanvas.drawBitmap(contentBitmap, 0f, 0f, null)
+
+            val clippedCircle = ImageHelper.getRoundedCornerBitmap(circleBitmap, minOf(circleBitmap.width, circleBitmap.height) / 2)
+            val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            Canvas(output).drawBitmap(clippedCircle, contentView.left.toFloat(), contentView.top.toFloat(), null)
+            output
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun resolveContactHeaderIconFillColor(bitmap: Bitmap): Int {
+        var red = 0L
+        var green = 0L
+        var blue = 0L
+        var count = 0L
+        for (y in 0 until bitmap.height) {
+            for (x in 0 until bitmap.width) {
+                val color = bitmap.getPixel(x, y)
+                val alpha = Color.alpha(color)
+                val r = Color.red(color)
+                val g = Color.green(color)
+                val b = Color.blue(color)
+                if (alpha <= 64 || (r > 210 && g > 210 && b > 210)) {
+                    continue
+                }
+                red += r
+                green += g
+                blue += b
+                count++
+            }
+        }
+        if (count == 0L) {
+            return Color.TRANSPARENT
+        }
+        return Color.rgb((red / count).toInt(), (green / count).toInt(), (blue / count).toInt())
+    }
+
+    private fun hideContactHeaderIconChildren(maskLayout: ViewGroup) {
+        for (i in 0 until maskLayout.childCount) {
+            maskLayout.getChildAt(i).visibility = View.INVISIBLE
+        }
+    }
+
+    private fun findContactHeaderEntryIconContainer(root: View?): View? {
+        root ?: return null
+        if (getViewResourceName(root) in contactHeaderIconContainerNames) {
+            return root
+        }
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                val match = findContactHeaderEntryIconContainer(root.getChildAt(i))
+                if (match != null) {
+                    return match
+                }
+            }
+        }
+        return null
     }
 //    private val settingMiniProgramTitleColor = false
 //

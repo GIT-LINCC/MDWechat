@@ -9,3 +9,38 @@
 .externalNativeBuild
 /.idea
 /app/release
+
+# Local Codex/debug artifacts
+/.codex/
+/.codex-debug/
+/perf-artifacts/
+
+# Local reverse-engineering scratch and extracted APK material.
+# Keep these on disk when useful, but never commit them.
+/jadx-*/
+/wechat-apk/
+/wechat-*.apk
+/*.apk
+
+# Local capture/log files from device debugging
+/current-*.png
+/current-*.xml
+/current-*.txt
+/ui-*.xml
+/logcat-*.txt
+/logcat-*.err.txt
+/logcat-*.pid
+/chat_bubble_debug_*.txt
+/chat_bubble_probe_*.txt
+/diagnostic-*.png
+/native-bubble-*.png
+/tablayout*.txt
+/tablayout*.html
+/lspd-modules-config.db
+
+# Personal local notes/reference snippets used during module experiments
+/chat-bubble-hook-notes.md
+/click-coordinate-memory.md
+/聊天气泡代码.txt
+/引用消息设计.txt
+/色彩转换.txt

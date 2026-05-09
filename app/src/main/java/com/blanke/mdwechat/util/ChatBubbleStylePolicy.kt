@@ -61,7 +61,8 @@ object ChatBubbleStylePolicy {
     data class MessageCandidate(
         val isTextMessage: Boolean,
         val side: Side?,
-        val senderKey: String?
+        val senderKey: String?,
+        val groupKey: String? = null
     )
 
     data class MessageRow(
@@ -70,13 +71,16 @@ object ChatBubbleStylePolicy {
         val side: Side?,
         val senderKey: String?,
         val createTimeMs: Long?,
-        val contentText: String?
+        val contentText: String?,
+        val hasTimeSeparatorBefore: Boolean = false,
+        val groupKey: String? = null
     ) {
         fun toCandidate(): MessageCandidate {
             return MessageCandidate(
                 isTextMessage = isTextMessage,
                 side = side,
-                senderKey = senderKey
+                senderKey = senderKey,
+                groupKey = groupKey
             )
         }
     }
@@ -109,11 +113,12 @@ object ChatBubbleStylePolicy {
         val quoteTextColor: Int,
         val quoteStrokeColor: Int,
         val strokeColor: Int,
-        val strokeWidthDp: Float
+        val strokeWidthDp: Float,
+        val useGradient: Boolean = true
     ) {
         val signature: String
             get() = "$bubbleColor:$pressedBubbleColor:$textColor:$semanticTextColor:$quoteFillColor:" +
-                    "$quoteTextColor:$quoteStrokeColor:$strokeColor:$strokeWidthDp"
+                    "$quoteTextColor:$quoteStrokeColor:$strokeColor:$strokeWidthDp:$useGradient"
     }
 
     fun groupPosition(hasPrevious: Boolean, hasNext: Boolean): GroupPosition {
@@ -122,6 +127,15 @@ object ChatBubbleStylePolicy {
             hasPrevious -> GroupPosition.BOTTOM
             hasNext -> GroupPosition.TOP
             else -> GroupPosition.SINGLE
+        }
+    }
+
+    fun positionWithoutNext(position: GroupPosition): GroupPosition {
+        return when (position) {
+            GroupPosition.TOP -> GroupPosition.SINGLE
+            GroupPosition.MIDDLE -> GroupPosition.BOTTOM
+            GroupPosition.BOTTOM,
+            GroupPosition.SINGLE -> position
         }
     }
 
@@ -232,8 +246,23 @@ object ChatBubbleStylePolicy {
             quoteFillColor = DEFAULT_LEFT_QUOTE_FILL_COLOR,
             quoteTextColor = DEFAULT_LEFT_QUOTE_TEXT_COLOR,
             quoteStrokeColor = TRANSPARENT_COLOR,
-            strokeColor = TRANSPARENT_COLOR,
-            strokeWidthDp = 0f
+            strokeColor = 0x52FFFFFF,
+            strokeWidthDp = 0.75f
+        )
+    }
+
+    fun imagePalette(): BubblePalette {
+        val bubbleColor = 0xFFFFFFFF.toInt()
+        return BubblePalette(
+            bubbleColor = bubbleColor,
+            pressedBubbleColor = scaleRgb(bubbleColor, 0.97f),
+            textColor = DEFAULT_LEFT_TEXT_COLOR,
+            semanticTextColor = dynamicSemanticTextColor(bubbleColor),
+            quoteFillColor = DEFAULT_LEFT_QUOTE_FILL_COLOR,
+            quoteTextColor = DEFAULT_LEFT_QUOTE_TEXT_COLOR,
+            quoteStrokeColor = TRANSPARENT_COLOR,
+            strokeColor = 0x14000000,
+            strokeWidthDp = 0.75f
         )
     }
 
@@ -260,6 +289,10 @@ object ChatBubbleStylePolicy {
 
     fun showNickname(position: GroupPosition): Boolean {
         return position == GroupPosition.SINGLE || position == GroupPosition.TOP
+    }
+
+    fun showNickname(side: Side, position: GroupPosition): Boolean {
+        return side == Side.LEFT && showNickname(position)
     }
 
     fun topMarginDp(position: GroupPosition): Float {
@@ -294,9 +327,13 @@ object ChatBubbleStylePolicy {
             }
             val previous = rows.getOrNull(index - 1)
             val next = rows.getOrNull(index + 1)
-            val hasPrevious = !isTimeSplit(previous, row, timeSeparatorGapMs) &&
+            val hasTimeBeforeCurrent = row.hasTimeSeparatorBefore ||
+                    isTimeSplit(previous, row, timeSeparatorGapMs)
+            val hasTimeBeforeNext = next?.hasTimeSeparatorBefore == true ||
+                    isTimeSplit(row, next, timeSeparatorGapMs)
+            val hasPrevious = !hasTimeBeforeCurrent &&
                     canGroupWith(row.toCandidate(), previous?.toCandidate())
-            val hasNext = !isTimeSplit(row, next, timeSeparatorGapMs) &&
+            val hasNext = !hasTimeBeforeNext &&
                     canGroupWith(row.toCandidate(), next?.toCandidate())
             val position = groupPosition(hasPrevious = hasPrevious, hasNext = hasNext)
             states[row.stableKey] = RenderState(
@@ -304,7 +341,7 @@ object ChatBubbleStylePolicy {
                 side = side,
                 position = position,
                 showAvatar = showAvatar(position),
-                showNickname = showNickname(position),
+                showNickname = showNickname(side, position),
                 topMarginDp = topMarginDp(position),
                 cornerRadii = cornerRadii(side, position)
             )
@@ -336,6 +373,35 @@ object ChatBubbleStylePolicy {
         return currentSender == neighborSender
     }
 
+    fun senderKeyForGrouping(side: Side?, talker: String?, content: String?): String? {
+        val embeddedSender = extractGroupSenderPrefix(content)
+        val groupConversation = isGroupConversationId(talker)
+        return when (side) {
+            Side.RIGHT -> "self"
+            Side.LEFT -> if (groupConversation) embeddedSender else talker ?: embeddedSender
+            null -> if (groupConversation) embeddedSender else talker ?: embeddedSender
+        }
+    }
+
+    fun isGroupConversationId(talker: String?): Boolean {
+        return talker?.endsWith("@chatroom", ignoreCase = true) == true
+    }
+
+    private fun extractGroupSenderPrefix(content: String?): String? {
+        val text = content ?: return null
+        val unixIndex = text.indexOf(":\n")
+        val windowsIndex = text.indexOf(":\r\n")
+        val index = when {
+            unixIndex > 0 -> unixIndex
+            windowsIndex > 0 -> windowsIndex
+            else -> -1
+        }
+        if (index !in 2..80) {
+            return null
+        }
+        return text.substring(0, index).takeIf { it.isNotBlank() }
+    }
+
     fun isTextLikeWechatMessage(type: Int?, content: String?): Boolean {
         if (isReferenceMessageContent(content)) {
             return true
@@ -360,6 +426,38 @@ object ChatBubbleStylePolicy {
                 isVoiceWechatMessage(type, content) ||
                 isCallWechatMessage(type, content) ||
                 isRichCardWechatMessage(type, content)
+    }
+
+    fun groupKeyForWechatMessage(type: Int?, content: String?): String? {
+        return when {
+            isTextLikeWechatMessage(type, content) -> "text"
+            isVoiceWechatMessage(type, content) -> "voice"
+            isCallWechatMessage(type, content) -> "call"
+            isImageWechatMessage(type, content) -> "image"
+            isLocationWechatMessage(type, content) -> "location"
+            isRichCardWechatMessage(type, content) -> "card"
+            else -> null
+        }
+    }
+
+    fun hasRedpacketCardTextSignal(text: String?): Boolean {
+        val value = text?.trim().orEmpty()
+        if (value.isBlank()) {
+            return false
+        }
+        if (value.contains("微信红包") || value.contains("恭喜发财")) {
+            return true
+        }
+        if (!value.contains("红包")) {
+            return false
+        }
+        return listOf(
+            "领取",
+            "已领",
+            "领完",
+            "已过期",
+            "红包封面"
+        ).any { marker -> value.contains(marker) }
     }
 
     private fun isTimeSplit(

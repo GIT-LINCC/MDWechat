@@ -287,15 +287,34 @@ object ModernChatBubbleStyler {
 
     private fun adjacentVisibleItem(itemView: View, step: Int): View? {
         val parent = itemView.parent as? ViewGroup ?: return null
-        val index = parent.indexOfChild(itemView)
-        if (index < 0) {
-            return null
+        val currentTop = screenTop(itemView)
+        var bestChild: View? = null
+        var bestTop = if (step > 0) Int.MAX_VALUE else Int.MIN_VALUE
+        for (index in 0 until parent.childCount) {
+            val child = parent.getChildAt(index)
+            if (child === itemView) {
+                continue
+            }
+            val childTop = screenTop(findItemRoot(child) ?: child)
+            if (step > 0) {
+                if (childTop > currentTop && childTop < bestTop) {
+                    bestTop = childTop
+                    bestChild = child
+                }
+            } else if (step < 0) {
+                if (childTop < currentTop && childTop > bestTop) {
+                    bestTop = childTop
+                    bestChild = child
+                }
+            }
         }
-        val targetIndex = index + step
-        if (targetIndex !in 0 until parent.childCount) {
-            return null
-        }
-        return parent.getChildAt(targetIndex)
+        return bestChild
+    }
+
+    private fun screenTop(view: View): Int {
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        return location[1]
     }
 
     private fun scheduleLegacyAppendRefresh(adapter: Any, position: Int, itemView: View) {
@@ -411,6 +430,20 @@ object ModernChatBubbleStyler {
     }
 
     fun resolveRenderStateFromAdapter(adapter: Any, position: Int): ChatBubbleStylePolicy.RenderState? {
+        return resolveRenderStateFromAdapter(
+            adapter = adapter,
+            position = position,
+            hasTimeBeforeCurrent = false,
+            hasTimeBeforeNext = false
+        )
+    }
+
+    fun resolveRenderStateFromAdapter(
+        adapter: Any,
+        position: Int,
+        hasTimeBeforeCurrent: Boolean,
+        hasTimeBeforeNext: Boolean
+    ): ChatBubbleStylePolicy.RenderState? {
         if (!isEnabled || position < 0) {
             return null
         }
@@ -421,7 +454,15 @@ object ModernChatBubbleStyler {
             anchorPosition = position
         ) ?: return null
         val current = window.byPosition[position]?.meta ?: return null
-        val rows = window.entries.map { it.meta.toMessageRow() }
+        val rows = window.entries.map { entry ->
+            entry.meta.toMessageRow(
+                hasTimeSeparatorBefore = when (entry.position) {
+                    position -> hasTimeBeforeCurrent
+                    position + 1 -> hasTimeBeforeNext
+                    else -> false
+                }
+            )
+        }
         return ChatBubbleStylePolicy.resolveRenderStates(rows)[current.stableKey]
     }
 
@@ -437,10 +478,17 @@ object ModernChatBubbleStyler {
             return emptyList()
         }
         val window = readWindowForVisibleResolution(adapter, visibleItems) ?: return emptyList()
-        val states = ChatBubbleStylePolicy.resolveRenderStates(
-            window.entries.map { it.meta.toMessageRow() }
-        )
         val matchedItems = matchVisibleItems(window, visibleItems)
+        val timeBeforeByPosition = matchedItems.associate { (visibleItem, matchedEntry) ->
+            matchedEntry.position to visibleItem.info.hasTimeSeparator
+        }
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            window.entries.map { entry ->
+                entry.meta.toMessageRow(
+                    hasTimeSeparatorBefore = timeBeforeByPosition[entry.position] == true
+                )
+            }
+        )
         debugVisibleResolution(recycler, adapter, window, visibleItems, matchedItems, states)
         return matchedItems.mapNotNull { (visibleItem, matchedEntry) ->
             rememberWindowEntry(adapter, visibleItem, matchedEntry)
@@ -1119,9 +1167,6 @@ object ModernChatBubbleStyler {
             avatarView = null,
             nicknameView = null
         )
-        if (side == Side.RIGHT) {
-            scheduleVisibleClusterRefresh(itemView)
-        }
     }
 
     fun applyLegacyTextMessageFromAdapter(
@@ -1142,10 +1187,8 @@ object ModernChatBubbleStyler {
             applyLegacyTextMessage(itemView, msgView, side)
         }
         if (scheduleAppendRefresh && adapter != null && position >= 0 && side == Side.RIGHT) {
-            scheduleLegacyAppendRefresh(adapter, position, itemView)
-        }
-        if (side == Side.RIGHT) {
-            scheduleVisibleClusterRefresh(itemView)
+            refreshVisibleNeighbor(adapter, position - 1, adjacentVisibleItem(itemView, step = -1))
+            refreshVisibleNeighbor(adapter, position + 1, adjacentVisibleItem(itemView, step = 1))
         }
     }
 
@@ -1155,10 +1198,8 @@ object ModernChatBubbleStyler {
             return
         }
         XposedHelpers.setAdditionalInstanceField(root, keyPendingVisibleClusterRefresh, true)
-        root.post {
-            XposedHelpers.removeAdditionalInstanceField(root, keyPendingVisibleClusterRefresh)
-            applyVisibleClusterAround(root)
-        }
+        XposedHelpers.removeAdditionalInstanceField(root, keyPendingVisibleClusterRefresh)
+        applyVisibleClusterAround(root)
     }
 
     private fun applyVisibleClusterAround(itemView: View): Boolean {
@@ -1635,7 +1676,7 @@ object ModernChatBubbleStyler {
         setTopMargin(marginTarget, dp(msgView, ChatBubbleStylePolicy.topMarginDp(position)))
 
         setAvatarVisibility(avatarView, ChatBubbleStylePolicy.showAvatar(position))
-        setNicknameVisibility(nicknameView, ChatBubbleStylePolicy.showNickname(position))
+        setNicknameVisibility(nicknameView, ChatBubbleStylePolicy.showNickname(side, position))
         tuneMessageRowHeight(itemView, msgView, avatarView, nicknameView, position)
         if (HookConfig.is_hook_chat_label_color && nicknameView != null) {
             setTextColors(nicknameView, HookConfig.chat_label_color, HookConfig.chat_label_color)
@@ -1658,11 +1699,7 @@ object ModernChatBubbleStyler {
         }
         listOfNotNull(rowRoot, bubbleRow, msgView.parent as? View).forEach { target ->
             target.minimumHeight = 0
-            target.requestLayout()
         }
-        compactRowHeight(rowRoot, bubbleRow, msgView, avatarView, nicknameView, position)
-        scheduleRowHeightCompact(rowRoot, msgView, avatarView, nicknameView, position)
-        (rowRoot.parent as? View)?.requestLayout()
     }
 
     private fun scheduleRowHeightCompact(
@@ -1737,7 +1774,7 @@ object ModernChatBubbleStyler {
             val avatarContainer = avatarView?.parent as? View ?: avatarView
             desiredHeight = maxOf(desiredHeight, bottomRelativeTo(rowRoot, avatarContainer))
         }
-        if (ChatBubbleStylePolicy.showNickname(position)) {
+        if (nicknameView?.visibility == View.VISIBLE) {
             desiredHeight = maxOf(desiredHeight, bottomRelativeTo(rowRoot, nicknameView))
         }
         desiredHeight = desiredHeight.coerceAtLeast(msgView.measuredHeight.takeIf { it > 0 } ?: msgView.height)
@@ -1767,13 +1804,30 @@ object ModernChatBubbleStyler {
         avatarView ?: return
         val container = avatarView.parent as? View ?: avatarView
         val params = container.layoutParams as? ViewGroup.LayoutParams
-        if (params != null && XposedHelpers.getAdditionalInstanceField(container, keyOriginalAvatarHeight) == null) {
-            XposedHelpers.setAdditionalInstanceField(container, keyOriginalAvatarHeight, params.height)
+        if (params != null) {
+            val remembered = XposedHelpers.getAdditionalInstanceField(container, keyOriginalAvatarHeight) as? Int
+            val observedSize = maxOf(
+                params.height,
+                params.width,
+                container.height,
+                container.width,
+                avatarView.height,
+                avatarView.width,
+                dp(avatarView, 45f)
+            )
+            if (remembered == null || remembered <= 0) {
+                XposedHelpers.setAdditionalInstanceField(container, keyOriginalAvatarHeight, observedSize)
+            }
         }
         if (visible) {
-            val originalHeight = XposedHelpers.getAdditionalInstanceField(container, keyOriginalAvatarHeight) as? Int
-            if (params != null && originalHeight != null && params.height != originalHeight) {
+            val originalHeight = (XposedHelpers.getAdditionalInstanceField(container, keyOriginalAvatarHeight) as? Int)
+                ?.takeIf { it > 0 }
+                ?: dp(avatarView, 45f)
+            if (params != null && params.height != originalHeight) {
                 params.height = originalHeight
+                if (params.width == 0) {
+                    params.width = originalHeight
+                }
                 container.layoutParams = params
             }
             container.visibility = View.VISIBLE
@@ -1848,7 +1902,7 @@ object ModernChatBubbleStyler {
             side = side,
             position = position,
             showAvatar = ChatBubbleStylePolicy.showAvatar(position),
-            showNickname = ChatBubbleStylePolicy.showNickname(position),
+            showNickname = ChatBubbleStylePolicy.showNickname(side, position),
             topMarginDp = ChatBubbleStylePolicy.topMarginDp(position),
             cornerRadii = ChatBubbleStylePolicy.cornerRadii(side, position)
         )
@@ -2913,11 +2967,7 @@ object ModernChatBubbleStyler {
                 false -> Side.LEFT
                 null -> null
             }
-            val senderKey = when (side) {
-                Side.RIGHT -> "self"
-                Side.LEFT -> extractGroupSender(content) ?: talker
-                null -> extractGroupSender(content) ?: talker
-            }
+            val senderKey = ChatBubbleStylePolicy.senderKeyForGrouping(side, talker, content)
             val stableKey = when {
                 msgId != null && msgId > 0 -> "msg:$msgId"
                 msgSvrId != null && msgSvrId > 0 -> "svr:$msgSvrId"
@@ -2930,7 +2980,8 @@ object ModernChatBubbleStyler {
                 senderKey = senderKey,
                 createTimeMs = createTime,
                 stableKey = stableKey,
-                contentText = normalizedContent
+                contentText = normalizedContent,
+                groupKey = ChatBubbleStylePolicy.groupKeyForWechatMessage(type, content)
             )
         }
 
@@ -3131,21 +3182,6 @@ object ModernChatBubbleStyler {
                     !name.startsWith("java.") &&
                     !name.startsWith("kotlin.") &&
                     !name.startsWith("androidx.recyclerview.")
-        }
-
-        private fun extractGroupSender(content: String?): String? {
-            val text = content ?: return null
-            val unixIndex = text.indexOf(":\n")
-            val windowsIndex = text.indexOf(":\r\n")
-            val index = when {
-                unixIndex > 0 -> unixIndex
-                windowsIndex > 0 -> windowsIndex
-                else -> -1
-            }
-            if (index !in 2..80) {
-                return null
-            }
-            return text.substring(0, index).takeIf { it.isNotBlank() }
         }
 
         private fun normalizeMessageContent(content: String?): String? {
@@ -3391,24 +3427,28 @@ object ModernChatBubbleStyler {
         val senderKey: String?,
         val createTimeMs: Long?,
         val stableKey: String,
-        val contentText: String?
+        val contentText: String?,
+        val groupKey: String?
     ) {
         fun toCandidate(): MessageCandidate {
             return MessageCandidate(
                 isTextMessage = isTextMessage,
                 side = side,
-                senderKey = senderKey
+                senderKey = senderKey,
+                groupKey = groupKey
             )
         }
 
-        fun toMessageRow(): ChatBubbleStylePolicy.MessageRow {
+        fun toMessageRow(hasTimeSeparatorBefore: Boolean = false): ChatBubbleStylePolicy.MessageRow {
             return ChatBubbleStylePolicy.MessageRow(
                 stableKey = stableKey,
                 isTextMessage = isTextMessage,
                 side = side,
                 senderKey = senderKey,
                 createTimeMs = createTimeMs,
-                contentText = contentText
+                contentText = contentText,
+                hasTimeSeparatorBefore = hasTimeSeparatorBefore,
+                groupKey = groupKey
             )
         }
     }
@@ -3438,7 +3478,8 @@ object ModernChatBubbleStyler {
             return MessageCandidate(
                 isTextMessage = meta?.isTextMessage ?: true,
                 side = side,
-                senderKey = resolvedSender
+                senderKey = resolvedSender,
+                groupKey = meta?.groupKey
             )
         }
     }

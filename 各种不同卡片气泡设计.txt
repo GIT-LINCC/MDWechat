@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MD3 WeChat Chat Bubbles - Rich Media Cards</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Roboto', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        :root {
+            --sender-bg: #0084FF;
+            --sender-text: #FFFFFF;
+            --sender-link: #CBE6FF;
+            --receiver-bg: #F0F4E8;
+            --receiver-text: #1A1C19;
+            --receiver-link: #2E6C38;
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        body { background-color: #EAEAEA; }
+
+        .bubble-ripple {
+            position: relative;
+            overflow: hidden;
+            transition: background-color 0.2s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        .bubble-ripple:active { 
+            filter: brightness(0.95); 
+            transform: scale(0.985); 
+        }
+        .bubble-transition { transition: border-radius 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+        /* 所有气泡/卡片通用的 MD3 阴影和微高光 */
+        div[class*="bubble-left-"], div[class*="bubble-right-"] {
+            box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.06), 0 2px 6px -1px rgba(0, 0, 0, 0.03) !important;
+            border: 1px solid rgba(255, 255, 255, 0.4); 
+        }
+
+        /* 左侧接收方动态圆角 */
+        .bubble-left-single { border-radius: 24px; } 
+        .bubble-left-top { border-radius: 24px 24px 24px 4px; }
+        .bubble-left-mid { border-radius: 4px 24px 24px 4px; }
+        .bubble-left-bot { border-radius: 4px 24px 24px 24px; }
+
+        /* 右侧发送方动态圆角 */
+        .bubble-right-single { border-radius: 24px; } 
+        .bubble-right-top { border-radius: 24px 24px 4px 24px; }
+        .bubble-right-mid { border-radius: 24px 4px 4px 24px; }
+        .bubble-right-bot { border-radius: 24px 4px 24px 24px; }
+        
+        .dynamic-sender-bg { background-color: var(--sender-bg); color: var(--sender-text); }
+        .dynamic-receiver-bg { background-color: var(--receiver-bg); color: var(--receiver-text); }
+
+        /* 卡片内部分割线 */
+        .md3-card-divider {
+            border-top: 1px solid rgba(0, 0, 0, 0.06);
+            margin-top: 8px;
+            padding-top: 8px;
+        }
+
+        .md3-link-card {
+            background: #FFFFFF;
+            width: 260px;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            text-align: left;
+            box-sizing: border-box;
+        }
+        .md3-link-title {
+            color: #111411;
+            font-size: 16px;
+            font-weight: 500;
+            line-height: 1.35;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .md3-link-row {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            margin-top: 8px;
+        }
+        .md3-link-summary {
+            flex: 1;
+            min-width: 0;
+            color: #4F5850;
+            font-size: 13px;
+            line-height: 1.45;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .md3-link-preview {
+            width: 64px;
+            height: 64px;
+            border-radius: 16px;
+            background: #F7F8F7;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .md3-link-preview svg {
+            width: 32px;
+            height: 32px;
+            color: #5F665F;
+        }
+        .md3-link-source-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .md3-link-source-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+            background: #FFF3E7;
+            color: #EF8F32;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            line-height: 1;
+        }
+        .md3-link-source {
+            color: #8F968E;
+            font-size: 11px;
+            line-height: 1.2;
+        }
+        
+        /* 微信转账专用色彩 (加上 MD3 的细腻感) */
+        .wx-transfer-bg { background-color: #F39B3B; color: #FFFFFF; }
+        .wx-transfer-received-bg { background-color: #FBE3C5; color: #E0852A; }
+        .wx-transfer-icon-bg { background-color: rgba(255,255,255,0.2); }
+        .wx-transfer-received-icon-bg { background-color: rgba(243, 155, 59, 0.2); }
+    </style>
+</head>
+<body class="h-screen flex items-center justify-center font-sans">
+
+    <div class="w-full max-w-[400px] h-[800px] max-h-screen bg-[#FCFDF6] shadow-2xl overflow-hidden flex flex-col relative sm:rounded-[36px] sm:border-[8px] border-gray-900">
+        
+        <div class="bg-[#FCFDF6]/90 backdrop-blur-md z-10 sticky top-0 px-4 py-3 flex items-center justify-between border-b border-gray-200">
+            <div class="flex items-center gap-2">
+                <svg class="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                <span class="text-lg font-medium text-gray-900">+27母上</span>
+            </div>
+            <svg class="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z"></path></svg>
+        </div>
+
+        <div class="flex-1 overflow-y-auto no-scrollbar p-4 flex flex-col gap-6" id="chat-container">
+            
+            <div class="text-center mt-2">
+                <span class="text-xs text-gray-400 font-medium tracking-wider">3月19日 凌晨00:00</span>
+            </div>
+
+            <!-- ===== 1. 个人名片 (MD3 Card 适配) ===== -->
+            <div class="flex flex-col gap-[2px] w-full animate-slide-up" style="animation-delay: 0.1s;">
+                <div class="flex items-end gap-2 max-w-[85%]">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Mom&backgroundColor=ffdfbf" alt="Avatar" class="w-10 h-10 rounded-full flex-shrink-0 object-cover border border-gray-100">
+                    
+                    <!-- 卡片主体：使用纯白背景，继承左侧气泡单条圆角规律 -->
+                    <div class="bg-white px-4 py-3 bubble-left-single bubble-ripple w-[240px] flex flex-col">
+                        <div class="flex items-center gap-3 mb-1">
+                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Cow&backgroundColor=c0aede" alt="Card Avatar" class="w-10 h-10 rounded-md object-cover border border-gray-100">
+                            <span class="text-[16px] text-gray-900 font-medium truncate">牛在飞</span>
+                        </div>
+                        <!-- 柔化底部分割线 -->
+                        <div class="md3-card-divider flex items-center gap-1">
+                            <span class="text-[11px] text-gray-400">个人名片</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="text-center mt-2">
+                <span class="text-xs text-gray-400 font-medium tracking-wider">4月9日 晚上20:34</span>
+            </div>
+
+            <!-- ===== 2. 编组：小程序 -> 文本 -> 转账 ===== -->
+            <div class="flex flex-col gap-[2px] w-full animate-slide-up" style="animation-delay: 0.2s;">
+                <!-- 2.1 小程序卡片 (首条 Top) -->
+                <div class="flex items-end gap-2 max-w-[85%]">
+                    <div class="w-10 h-10 flex-shrink-0"></div> <!-- 头像占位 -->
+                    
+                    <div class="bg-white px-4 py-3 bubble-left-top bubble-ripple w-[260px] flex flex-col">
+                        <div class="flex items-center gap-1.5 mb-2">
+                            <div class="w-4 h-4 bg-red-500 rounded-sm flex items-center justify-center">
+                                <span class="text-white text-[10px]">拼</span>
+                            </div>
+                            <span class="text-[12px] text-gray-500">多多买菜</span>
+                            <span class="text-[10px] text-green-500 bg-green-50 px-1 rounded border border-green-200">交易保障</span>
+                        </div>
+                        <span class="text-[15px] text-gray-900 leading-snug mb-2 line-clamp-2">今日必抢！500张*8包/提【万人团 爆品】随便纸巾M码加厚可...</span>
+                        
+                        <div class="w-full h-24 bg-gray-50 rounded-xl flex items-center justify-center mb-1 border border-gray-100">
+                            <svg class="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                        </div>
+                        
+                        <div class="md3-card-divider flex items-center gap-1">
+                            <svg class="w-3 h-3 text-blue-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+                            <span class="text-[11px] text-gray-400">小程序</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2.2 文本消息 (中间条 Mid) -->
+                <div class="flex items-end gap-2 max-w-[85%] mt-[2px]">
+                    <div class="w-10 h-10 flex-shrink-0"></div> <!-- 头像占位 -->
+                    <div class="dynamic-receiver-bg px-4 py-2.5 bubble-left-mid text-[15px] leading-relaxed bubble-ripple">
+                        下两单
+                    </div>
+                </div>
+
+                <!-- 2.3 微信转账 (末条 Bot) - 母亲发出的转账 -->
+                <div class="flex items-end gap-2 max-w-[85%] mt-[2px]">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Mom&backgroundColor=ffdfbf" alt="Avatar" class="w-10 h-10 rounded-full flex-shrink-0 object-cover border border-gray-100">
+                    <div class="wx-transfer-bg px-4 pt-4 pb-3 bubble-left-bot bubble-ripple w-[240px] flex flex-col">
+                        <div class="flex items-center gap-3 mb-2">
+                            <div class="w-10 h-10 rounded-full wx-transfer-icon-bg flex items-center justify-center flex-shrink-0">
+                                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-[18px] font-medium leading-none mb-1 text-white">¥27.00</span>
+                                <span class="text-[12px] text-white/80 leading-none">请收款</span>
+                            </div>
+                        </div>
+                        <div class="border-t border-white/20 mt-1 pt-2">
+                            <span class="text-[11px] text-white/70">微信转账</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== 3. 已收款记录 (单条 Single) - 你的操作记录 ===== -->
+            <div class="flex flex-col gap-[2px] w-full items-end animate-slide-up mt-4" style="animation-delay: 0.3s;">
+                <div class="flex items-end justify-end gap-2 max-w-[85%]">
+                    <!-- 领取状态：变浅橙色，因为是单条，使用纯圆角 single -->
+                    <div class="wx-transfer-received-bg px-4 pt-4 pb-3 bubble-right-single bubble-ripple w-[240px] flex flex-col">
+                        <div class="flex items-center gap-3 mb-2">
+                            <div class="w-10 h-10 rounded-full wx-transfer-received-icon-bg flex items-center justify-center flex-shrink-0">
+                                <svg class="w-6 h-6 text-[#E0852A]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-[18px] font-medium leading-none mb-1 text-[#E0852A]">¥27.00</span>
+                                <span class="text-[12px] text-[#E0852A]/80 leading-none">已收款</span>
+                            </div>
+                        </div>
+                        <div class="border-t border-[#E0852A]/20 mt-1 pt-2">
+                            <span class="text-[11px] text-[#E0852A]/70">微信转账</span>
+                        </div>
+                    </div>
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Mia&backgroundColor=ffdfbf" alt="My Avatar" class="w-10 h-10 rounded-full flex-shrink-0 object-cover border border-gray-100">
+                </div>
+            </div>
+
+            <!-- ===== 新增：4. 图片消息与编组 ===== -->
+            <div class="text-center mt-4">
+                <span class="text-xs text-gray-400 font-medium tracking-wider">4月10日 上午09:16</span>
+            </div>
+
+            <!-- 图片与文本的连发编组 (图片作为 Top，文本作为 Bot) -->
+            <div class="flex flex-col gap-[2px] w-full animate-slide-up" style="animation-delay: 0.4s;">
+                
+                <!-- 4.1 图片消息 (首条 Top) -->
+                <div class="flex items-end gap-2 max-w-[85%]">
+                    <div class="w-10 h-10 flex-shrink-0"></div> <!-- 头像占位 -->
+                    
+                    <!-- 核心：使用 overflow-hidden 和 dynamic border-radius 裁切图片 -->
+                    <!-- 增加了一圈极细的黑边 border-black/5 防止白色截图和背景融为一体 -->
+                    <div class="bubble-left-top overflow-hidden border border-black/5 shadow-sm bg-white relative group cursor-pointer">
+                        <!-- 模拟长截图 -->
+                        <img src="https://images.unsplash.com/photo-1616423640778-28d1b53229bd?auto=format&fit=crop&w=300&q=80" alt="Chat Image" class="w-[180px] h-[320px] object-cover block">
+                        <!-- MD3 按压反馈 (图片没有 padding，所以通过绝对定位的黑色半透明层实现点击涟漪) -->
+                        <div class="absolute inset-0 bg-black opacity-0 group-active:opacity-10 transition-opacity"></div>
+                    </div>
+                </div>
+
+                <!-- 4.2 文本消息 (末条 Bot) -->
+                <div class="flex items-end gap-2 max-w-[85%] mt-[2px]">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Mom&backgroundColor=ffdfbf" alt="Avatar" class="w-10 h-10 rounded-full flex-shrink-0 object-cover border border-gray-100">
+                    <div class="dynamic-receiver-bg px-4 py-2.5 bubble-left-bot text-[15px] leading-relaxed bubble-ripple">
+                        记得拿快递
+                    </div>
+                </div>
+            </div>
+
+            <div class="text-center mt-4">
+                <span class="text-xs text-gray-400 font-medium tracking-wider">4月10日 晚上19:05</span>
+            </div>
+
+            <!-- 发送方回复 (单条 Single) -->
+            <div class="flex flex-col gap-[2px] w-full items-end animate-slide-up" style="animation-delay: 0.5s;">
+                <div class="flex items-end justify-end gap-2 max-w-[85%]">
+                    <div class="dynamic-sender-bg px-4 py-2.5 bubble-right-single text-[15px] leading-relaxed bubble-ripple">
+                        拿了
+                    </div>
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Mia&backgroundColor=ffdfbf" alt="My Avatar" class="w-10 h-10 rounded-full flex-shrink-0 object-cover border border-gray-100">
+                </div>
+            </div>
+            <!-- ============================== -->
+
+            <!-- ===== 新增：5. 发送方的富媒体卡片 (白底 + 右侧动态圆角) ===== -->
+            <div class="text-center mt-4">
+                <span class="text-xs text-gray-400 font-medium tracking-wider">昨天 23:37</span>
+            </div>
+
+            <div class="flex flex-col gap-[2px] w-full items-end animate-slide-up" style="animation-delay: 0.6s;">
+                <!-- 5.1 文本消息 (首条 Top) -> 使用用户自定义蓝色 -->
+                <div class="flex items-end justify-end gap-2 max-w-[85%]">
+                    <div class="dynamic-sender-bg px-4 py-2.5 bubble-right-top text-[15px] leading-relaxed bubble-ripple">
+                        推给你了，你加一下
+                    </div>
+                    <div class="w-10 h-10 flex-shrink-0"></div> <!-- 头像占位 -->
+                </div>
+
+                <!-- 5.2 个人名片 (末条 Bot) -> 强制白底，保留右侧编组圆角 -->
+                <div class="flex items-end justify-end gap-2 max-w-[85%] mt-[2px]">
+                    <div class="bg-white px-4 py-3 bubble-right-bot bubble-ripple w-[240px] flex flex-col text-left">
+                        <div class="flex items-center gap-3 mb-1">
+                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Cow&backgroundColor=c0aede" alt="Card Avatar" class="w-10 h-10 rounded-md object-cover border border-gray-100">
+                            <span class="text-[16px] text-gray-900 font-medium truncate">牛在飞</span>
+                        </div>
+                        <div class="md3-card-divider flex items-center gap-1">
+                            <span class="text-[11px] text-gray-400">个人名片</span>
+                        </div>
+                    </div>
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Mia&backgroundColor=ffdfbf" alt="My Avatar" class="w-10 h-10 rounded-full flex-shrink-0 object-cover border border-gray-100">
+                </div>
+            </div>
+            <!-- ============================== -->
+
+            <!-- ===== 新增：6. 位置地图卡片与文本连发 ===== -->
+            <div class="text-center mt-4">
+                <span class="text-xs text-gray-400 font-medium tracking-wider">00:45</span>
+            </div>
+
+            <div class="flex flex-col gap-[2px] w-full items-end animate-slide-up" style="animation-delay: 0.7s;">
+                
+                <!-- 6.1 地图位置卡片 (首条 Top) -->
+                <div class="flex items-end justify-end gap-2 max-w-[85%]">
+                    <!-- 核心：overflow-hidden 确保内部地图被父级容器裁切成 MD3 圆角 -->
+                    <div class="bg-white bubble-right-top overflow-hidden bubble-ripple w-[240px] flex flex-col text-left">
+                        
+                        <!-- 文本信息区 (保留正常的 Padding) -->
+                        <div class="px-3 pt-3 pb-2 flex flex-col">
+                            <span class="text-[16px] text-gray-900 font-medium truncate">永嘉县温州约伯泵阀有限公司</span>
+                            <span class="text-[12px] text-gray-500 truncate mt-0.5">永嘉县南环路</span>
+                        </div>
+                        
+                        <!-- 分割线 (极度柔化) -->
+                        <div class="border-t border-black/5 w-full"></div>
+
+                        <!-- 地图图片区 (全出血排版，高度固定，自动被父容器裁切圆角) -->
+                        <div class="relative w-full h-[100px] bg-gray-100">
+                            <!-- 使用地图样式网图模拟 -->
+                            <img src="https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=400&q=80" alt="Map" class="w-full h-full object-cover">
+                            
+                            <!-- 模拟中心绿点 -->
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <div class="w-6 h-6 rounded-full bg-[#1AAD19]/20 flex items-center justify-center">
+                                    <div class="w-3 h-3 rounded-full bg-[#1AAD19] border-2 border-white shadow-sm"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="w-10 h-10 flex-shrink-0"></div> <!-- 头像占位 -->
+                </div>
+
+                <div class="text-center mt-3 mb-1">
+                    <span class="text-xs text-gray-400 font-medium tracking-wider">15:18</span>
+                </div>
+
+                <!-- 6.2 文本消息 (末条 Bot) -->
+                <div class="flex items-end justify-end gap-2 max-w-[85%]">
+                    <div class="dynamic-sender-bg px-4 py-2.5 bubble-right-bot text-[15px] leading-relaxed bubble-ripple">
+                        test
+                    </div>
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Mia&backgroundColor=ffdfbf" alt="My Avatar" class="w-10 h-10 rounded-full flex-shrink-0 object-cover border border-gray-100">
+                </div>
+            </div>
+            <!-- ============================== -->
+
+            <!-- ===== 新增：7. 链接/网页分享卡片 ===== -->
+            <div class="text-center mt-4">
+                <span class="text-xs text-gray-400 font-medium tracking-wider">4月30日 上午09:29</span>
+            </div>
+
+            <div class="flex flex-col gap-[2px] w-full animate-slide-up" style="animation-delay: 0.8s;">
+                <div class="flex items-end gap-2 max-w-[85%]">
+                    <div class="w-10 h-10 flex-shrink-0"></div> <!-- 头像占位 -->
+
+                    <div class="md3-link-card bubble-left-single bubble-ripple">
+                        <span class="md3-link-title">[杂谈氵] 这种up都能贡献清零吗</span>
+
+                        <div class="md3-link-row">
+                            <span class="md3-link-summary">一条来自NGA的热点内容，快来参与讨论吧</span>
+                            <div class="md3-link-preview">
+                                <svg class="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13.8 10.2a4 4 0 0 0-5.6 0l-3 3a4 4 0 0 0 5.6 5.6l1.1-1.1M10.2 13.8a4 4 0 0 0 5.6 0l3-3a4 4 0 0 0-5.6-5.6l-1.1 1.1"/>
+                                </svg>
+                            </div>
+                        </div>
+
+                        <div class="md3-card-divider md3-link-source-row">
+                            <span class="md3-link-source-icon">N</span>
+                            <span class="md3-link-source">NGA玩家社区</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- ============================== -->
+
+            <div id="chat-bottom-spacer" class="h-4 w-full"></div>
+        </div>
+    </div>
+</body>
+</html>

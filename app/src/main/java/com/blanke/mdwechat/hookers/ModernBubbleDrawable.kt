@@ -24,7 +24,7 @@ class ModernBubbleDrawable(
     private var palette = initialPalette
     private var currentRadii = initialState.cornerRadii
     private var baseColor = initialPalette.bubbleColor
-    private var gradientColors = intArrayOf(lighten(baseColor), baseColor, darken(baseColor))
+    private var gradientColors = gradientColorsFor(initialPalette)
     private val gradientStops = floatArrayOf(0f, 0.55f, 1f)
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -162,7 +162,7 @@ class ModernBubbleDrawable(
         }
         palette = nextPalette
         baseColor = nextPalette.bubbleColor
-        gradientColors = intArrayOf(lighten(baseColor), baseColor, darken(baseColor))
+        gradientColors = gradientColorsFor(nextPalette)
         strokePaint.strokeWidth = dp(nextPalette.strokeWidthDp)
         strokePaint.color = nextPalette.strokeColor
         invalidateDrawingCache()
@@ -191,6 +191,14 @@ class ModernBubbleDrawable(
 
     private fun lerp(start: Float, end: Float, fraction: Float): Float {
         return start + (end - start) * fraction
+    }
+
+    private fun gradientColorsFor(palette: ChatBubbleStylePolicy.BubblePalette): IntArray {
+        return if (palette.useGradient) {
+            intArrayOf(lighten(palette.bubbleColor), palette.bubbleColor, darken(palette.bubbleColor))
+        } else {
+            intArrayOf(palette.bubbleColor, palette.bubbleColor, palette.bubbleColor)
+        }
     }
 
     private fun lighten(color: Int): Int {

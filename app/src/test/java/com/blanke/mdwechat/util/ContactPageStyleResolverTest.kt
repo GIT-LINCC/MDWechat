@@ -1,7 +1,6 @@
 package com.blanke.mdwechat.util
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.blanke.mdwechat.Version
@@ -30,12 +29,17 @@ class ContactPageStyleResolverTest {
     }
 
     @Test
-    fun keepsNativeHeaderIconTreeOnWeChat8049AndNewer() {
-        assertFalse(ContactPageStyleResolver.shouldWrapHeaderEntryIcon(Version("8.0.49")))
+    fun wrapsHeaderEntryIconsOnWeChat8049() {
+        assertTrue(ContactPageStyleResolver.shouldWrapHeaderEntryIcon(Version("8.0.49")))
     }
 
     @Test
-    fun keepsLegacyHeaderIconWrappingBeforeWeChat8049() {
+    fun keepsLegacyHeaderIconWrapping() {
         assertTrue(ContactPageStyleResolver.shouldWrapHeaderEntryIcon(Version("8.0.48")))
+    }
+
+    @Test
+    fun skipsHeaderEntryIconWrappingWhenVersionIsUnknown() {
+        assertTrue(!ContactPageStyleResolver.shouldWrapHeaderEntryIcon(null))
     }
 }
