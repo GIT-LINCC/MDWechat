@@ -810,16 +810,9 @@ object ModernChatBubbleRenderer {
         if (card.width <= dp(card, 34f)) {
             return
         }
-        val preview = findViewByResourceName(card, "big") ?: return
-        val panel = (preview.parent as? View) ?: preview
-        val previewTop = panel.top.takeIf { it > 0 } ?: return
-        val previewBottom = previewTop + dp(card, 98.5f)
-        val footerBottom = findViewByResourceName(card, "bir")
-            ?.bottom
-            ?.takeIf { it > previewTop }
-            ?: 0
         val currentContentBottom = deepestVisibleChildBottom(card)
-        val desiredHeight = maxOf(previewBottom, footerBottom, currentContentBottom) + dp(card, 1f)
+        val referenceHeight = scaledByMiniProgramCardWidth(card, miniProgramReferenceCardHeight)
+        val desiredHeight = maxOf(referenceHeight, currentContentBottom + dp(card, 1f))
         if (desiredHeight <= dp(card, 34f)) {
             return
         }
@@ -1204,6 +1197,10 @@ object ModernChatBubbleRenderer {
 
     private fun scaledByCardWidth(card: View, referenceValue: Float): Int {
         return (card.width * referenceValue / transferReferenceCardWidth + 0.5f).toInt()
+    }
+
+    private fun scaledByMiniProgramCardWidth(card: View, referenceValue: Float): Int {
+        return (card.width * referenceValue / miniProgramReferenceCardWidth + 0.5f).toInt()
     }
 
     private fun scaledByPositionCardWidth(card: View, referenceValue: Float): Int {
@@ -1945,7 +1942,7 @@ object ModernChatBubbleRenderer {
             return BubbleTarget(
                 bubbleView = target,
                 textView = null,
-                kind = classifyKind(kind, text),
+                kind = classifyKind(kind, text, target),
                 applyTextPadding = false,
                 layoutView = target,
                 clearViews = clearViews,
@@ -1955,18 +1952,28 @@ object ModernChatBubbleRenderer {
             )
         }
 
-        private fun classifyKind(fallback: String, text: String): String {
+        private fun classifyKind(fallback: String, text: String, target: View): String {
+            val hasMiniProgramFooter = hasMiniProgramFooterSignal(target)
+            val hasWebShareSignals = findViewByResourceName(target, "biy") != null &&
+                    hasAnyResourceName(target, "bjx", "bju", "bjr", "bjs", "bjl", "bjp")
+            if (fallback == "mini-program") {
+                return when {
+                    hasMiniProgramFooter -> "mini-program"
+                    hasWebShareSignals -> "rich-card"
+                    else -> "mini-program"
+                }
+            }
             return when {
                 fallback == "redpacket" -> "redpacket"
-                fallback == "mini-program" -> "mini-program"
                 text.contains("微信转账") ||
                         text.contains("转账") ||
                         text.contains("收款") ||
                         text.contains("¥") ||
                         text.contains("￥") -> classifyTransferKind(text)
                 ChatBubbleStylePolicy.hasRedpacketCardTextSignal(text) -> "redpacket"
-                text.contains("小程序") -> "mini-program"
+                hasMiniProgramFooter -> "mini-program"
                 text.contains("个人名片") || text.contains("名片") -> "contact-card"
+                hasWebShareSignals -> "rich-card"
                 else -> fallback
             }
         }
@@ -1989,15 +1996,7 @@ object ModernChatBubbleRenderer {
                         findViewByResourceName(target, "a45") != null ||
                         findViewByResourceName(target, "gbh") != null)
         val hasTransferTextSignal = hasTransferTextSignal(sample)
-        val hasMiniProgramSignals = hasAnyResourceName(
-            target,
-            "biq",
-            "biu",
-            "big",
-            "bit",
-            "bif",
-            "bko"
-        )
+        val hasMiniProgramFooter = hasMiniProgramFooterSignal(target)
         val hasWebShareSignals = hasAnyResourceName(
             target,
             "bju",
@@ -2008,7 +2007,7 @@ object ModernChatBubbleRenderer {
         if (!hasTransferOrGenericCardSignals &&
             !hasModernTransferSignals &&
             !hasTransferTextSignal &&
-            !hasMiniProgramSignals &&
+            !hasMiniProgramFooter &&
             !hasWebShareSignals
         ) {
             return null
@@ -2026,7 +2025,7 @@ object ModernChatBubbleRenderer {
                 hasTransferSignals = hasTransferOrGenericCardSignals ||
                         hasModernTransferSignals ||
                         hasTransferTextSignal,
-                hasMiniProgramSignals = hasMiniProgramSignals,
+                hasMiniProgramFooter = hasMiniProgramFooter,
                 hasWebShareSignals = hasWebShareSignals
             ),
             applyTextPadding = false,
@@ -2040,12 +2039,12 @@ object ModernChatBubbleRenderer {
     private fun classifyKnownCardKind(
         text: String,
         hasTransferSignals: Boolean,
-        hasMiniProgramSignals: Boolean,
+        hasMiniProgramFooter: Boolean,
         hasWebShareSignals: Boolean
     ): String {
         return when {
             hasTransferSignals -> classifyTransferKind(text)
-            hasMiniProgramSignals || text.contains("小程序") -> "mini-program"
+            hasMiniProgramFooter -> "mini-program"
             ChatBubbleStylePolicy.hasRedpacketCardTextSignal(text) -> "redpacket"
             text.contains("个人名片") || text.contains("名片") -> "contact-card"
             hasWebShareSignals -> "rich-card"
@@ -2434,9 +2433,31 @@ object ModernChatBubbleRenderer {
             .takeIf { it.isNotBlank() }
     }
 
+    private fun hasMiniProgramFooterSignal(root: View): Boolean {
+        val footer = findViewByResourceName(root, "bit") ?: return false
+        if (!isVisibleDescendant(root, footer)) {
+            return false
+        }
+        return renderedText(footer)?.trim() == "小程序"
+    }
+
     private fun hasAnyResourceName(root: View, vararg names: String): Boolean {
         val wanted = names.toSet()
         return containsAnyResourceName(root, wanted)
+    }
+
+    private fun isVisibleDescendant(root: View, child: View): Boolean {
+        var current: View? = child
+        while (current != null) {
+            if (current.visibility != View.VISIBLE) {
+                return false
+            }
+            if (current === root) {
+                return true
+            }
+            current = current.parent as? View
+        }
+        return false
     }
 
     private fun containsAnyResourceName(view: View, names: Set<String>): Boolean {
