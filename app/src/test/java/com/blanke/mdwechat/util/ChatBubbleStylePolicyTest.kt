@@ -296,33 +296,35 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
-    fun cachedRightBubbleShapeCanGrowWhenNewNeighborArrives() {
+    fun cachedBubbleShapeCanGrowWhenNewNeighborArrives() {
         assertTrue(
             ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
-                ChatBubbleStylePolicy.Side.RIGHT,
                 ChatBubbleStylePolicy.GroupPosition.SINGLE,
                 ChatBubbleStylePolicy.GroupPosition.TOP
             )
         )
         assertTrue(
             ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
-                ChatBubbleStylePolicy.Side.RIGHT,
                 ChatBubbleStylePolicy.GroupPosition.BOTTOM,
                 ChatBubbleStylePolicy.GroupPosition.MIDDLE
             )
         )
+        assertTrue(
+            ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
+                ChatBubbleStylePolicy.GroupPosition.SINGLE,
+                ChatBubbleStylePolicy.GroupPosition.BOTTOM
+            )
+        )
         assertFalse(
             ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
-                ChatBubbleStylePolicy.Side.RIGHT,
                 ChatBubbleStylePolicy.GroupPosition.MIDDLE,
                 ChatBubbleStylePolicy.GroupPosition.BOTTOM
             )
         )
         assertFalse(
             ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
-                ChatBubbleStylePolicy.Side.LEFT,
                 ChatBubbleStylePolicy.GroupPosition.SINGLE,
-                ChatBubbleStylePolicy.GroupPosition.TOP
+                ChatBubbleStylePolicy.GroupPosition.SINGLE
             )
         )
     }
@@ -565,6 +567,8 @@ class ChatBubbleStylePolicyTest {
         assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(50, "通话时长 01:48"))
         assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(1, "plain text"))
         assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(3, "<msg><img aeskey=\"x\" /></msg>"))
+        assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(43, "<msg><videomsg /></msg>"))
+        assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(62, "<msg><videomsg /></msg>"))
         assertTrue(ChatBubbleStylePolicy.isStylableWechatBubbleMessage(48, "<msg><location /></msg>"))
     }
 
@@ -606,7 +610,7 @@ class ChatBubbleStylePolicyTest {
                 "<msg><img aeskey=\"x\" /></msg>"
             )
         )
-        assertFalse(
+        assertTrue(
             ChatBubbleStylePolicy.isStylableWechatBubbleMessage(
                 43,
                 "<msg><videomsg /></msg>"
@@ -660,14 +664,42 @@ class ChatBubbleStylePolicyTest {
         val states = ChatBubbleStylePolicy.resolveRenderStates(
             listOf(
                 row("image", ChatBubbleStylePolicy.Side.LEFT, "alice", 1_000L, "[image]", isTextMessage = true),
-                row("location", ChatBubbleStylePolicy.Side.LEFT, "alice", 2_000L, "[location]", isTextMessage = true),
-                row("text", ChatBubbleStylePolicy.Side.LEFT, "alice", 3_000L, "ok", isTextMessage = true)
+                row("video", ChatBubbleStylePolicy.Side.LEFT, "alice", 2_000L, "<videomsg />", isTextMessage = true),
+                row("location", ChatBubbleStylePolicy.Side.LEFT, "alice", 3_000L, "[location]", isTextMessage = true),
+                row("text", ChatBubbleStylePolicy.Side.LEFT, "alice", 4_000L, "ok", isTextMessage = true)
             )
         )
 
         assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("image").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.MIDDLE, states.getValue("video").position)
         assertEquals(ChatBubbleStylePolicy.GroupPosition.MIDDLE, states.getValue("location").position)
         assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("text").position)
+    }
+
+    @Test
+    fun explicitTimeSeparatorBeforeNextRowEndsPreviousMixedMediaGroup() {
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(
+                row("image", ChatBubbleStylePolicy.Side.LEFT, "alice", 1_000L, "[image]", isTextMessage = true),
+                row("text1", ChatBubbleStylePolicy.Side.LEFT, "alice", 2_000L, "finally fixed", isTextMessage = true),
+                row("text2", ChatBubbleStylePolicy.Side.LEFT, "alice", 3_000L, "pro subscription", isTextMessage = true),
+                row(
+                    "emoji",
+                    ChatBubbleStylePolicy.Side.LEFT,
+                    "alice",
+                    4_000L,
+                    "[wow]",
+                    isTextMessage = true,
+                    hasTimeSeparatorBefore = true
+                )
+            )
+        )
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("image").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.MIDDLE, states.getValue("text1").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("text2").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.SINGLE, states.getValue("emoji").position)
+        assertTrue(states.getValue("text2").showAvatar)
     }
 
     @Test

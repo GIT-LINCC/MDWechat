@@ -53,6 +53,7 @@ object ModernChatBubbleRenderer {
     private const val keyPendingContactMeasuredTune = "mdwechat_native_bubble_pending_contact_measured_tune"
     private const val keyPendingPaymentMeasuredTune = "mdwechat_native_bubble_pending_payment_measured_tune"
     private const val keyPendingPositionMeasuredTune = "mdwechat_native_bubble_pending_position_measured_tune"
+    private const val keyPendingWebShareMeasuredTune = "mdwechat_native_bubble_pending_web_share_measured_tune"
     private const val miniProgramReferenceCardWidth = 260f
     private const val miniProgramReferenceCardHeight = 234.75f
     private const val contactReferenceCardWidth = 240f
@@ -175,8 +176,8 @@ object ModernChatBubbleRenderer {
             return false
         }
         val applied = applyState(boundView, context.state, "chatItem:${msgInfo.javaClass.simpleName}")
+        val itemView = findItemRoot(boundView) ?: boundView
         if (applied && context.adapter != null && context.position >= 0) {
-            val itemView = findItemRoot(boundView) ?: boundView
             refreshVisibleNeighborItemsIfNeeded(context.adapter, context.position, itemView, context.state)
         }
         return applied
@@ -201,12 +202,17 @@ object ModernChatBubbleRenderer {
             debug(itemView, "$source noText target=${resourceName(bubbleView)} kind=${target.kind}")
             return false
         }
+        if (shouldDeferCompactTopEdgeTextItem(itemView, target)) {
+            debug(itemView, "$source deferTopEdgeText item=${boundsText(itemView)} text=${shortText(text)}")
+            return false
+        }
         val renderState = applyVisibleBoundaries(itemView, state)
         val palette = paletteForTarget(target, renderState)
         val signature = renderSignature(renderState, text, palette)
         if (isCurrentRender(itemView, bubbleView, renderState, signature)) {
             syncReusableState(itemView, target, renderState)
             tuneRichCardContent(target)
+            tuneMediaContent(target)
             debugApply(itemView, bubbleView, renderState, source, text, "current")
             scheduleBoundaryRefresh(itemView, state, renderState, source)
             return true
@@ -243,6 +249,7 @@ object ModernChatBubbleRenderer {
         }
         setBubbleTextColors(target, palette.textColor, palette.semanticTextColor)
         tuneRichCardContent(target)
+        tuneMediaContent(target)
         applyShadow(bubbleView, renderState)
         applyContentClipIfNeeded(bubbleView, target)
         disableAncestorClipping(bubbleView)
@@ -267,9 +274,12 @@ object ModernChatBubbleRenderer {
         itemView: View,
         state: ChatBubbleStylePolicy.RenderState
     ) {
-        if (state.side != ChatBubbleStylePolicy.Side.RIGHT ||
-            state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE
-        ) {
+        if (state.side != ChatBubbleStylePolicy.Side.RIGHT) {
+            return
+        }
+        val appliedPosition = (findBubbleTarget(itemView)?.bubbleView?.background as? ModernBubbleDrawable)?.position
+            ?: state.position
+        if (appliedPosition == ChatBubbleStylePolicy.GroupPosition.SINGLE) {
             return
         }
         refreshVisibleNeighborItem(
@@ -652,6 +662,21 @@ object ModernChatBubbleRenderer {
         tuneRichCardContentNow(target)
     }
 
+    private fun tuneMediaContent(target: BubbleTarget) {
+        if (target.kind != "video") {
+            return
+        }
+        val imageView = findViewByResourceName(target.bubbleView, "bkm") as? ImageView ?: return
+        if (imageView.scaleType != ImageView.ScaleType.CENTER_CROP) {
+            imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        imageView.adjustViewBounds = false
+        clearViewLayer(imageView)
+        listOf("bqy", "boy").forEach { name ->
+            findViewByResourceName(target.bubbleView, name)?.bringToFront()
+        }
+    }
+
     private fun isTunableRichCard(kind: String): Boolean {
         return kind == "mini-program" ||
                 kind == "contact-card" ||
@@ -675,14 +700,14 @@ object ModernChatBubbleRenderer {
     }
 
     private fun tuneMiniProgramCard(card: View) {
-        val needsMeasuredTune = card.width <= dp(card, 34f)
+        val needsMeasuredTune = card.width <= dp(card, 34f) || card.height <= dp(card, 34f)
         setTextColorByName(card, "biu", 0xFF4F5850.toInt())
         setTextColorByName(card, "biq", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
         setTextColorByName(card, "bit", 0xFF8F968E.toInt())
-        setMiniProgramCardMinHeight(card)
         tuneMiniProgramTitle(card)
         setMiniProgramPreviewStyle(card)
         tuneMiniProgramFooter(card)
+        normalizeMiniProgramCardHeight(card)
         if (needsMeasuredTune) {
             scheduleMiniProgramMeasuredTune(card)
         }
@@ -781,15 +806,27 @@ object ModernChatBubbleRenderer {
         }
     }
 
-    private fun setMiniProgramCardMinHeight(card: View) {
+    private fun normalizeMiniProgramCardHeight(card: View) {
         if (card.width <= dp(card, 34f)) {
             return
         }
-        val desiredHeight = (card.width * miniProgramReferenceCardHeight / miniProgramReferenceCardWidth + 0.5f).toInt()
-        if (card.minimumHeight != desiredHeight) {
-            card.minimumHeight = desiredHeight
-            card.requestLayout()
+        val preview = findViewByResourceName(card, "big") ?: return
+        val panel = (preview.parent as? View) ?: preview
+        val previewTop = panel.top.takeIf { it > 0 } ?: return
+        val previewBottom = previewTop + dp(card, 98.5f)
+        val footerBottom = findViewByResourceName(card, "bir")
+            ?.bottom
+            ?.takeIf { it > previewTop }
+            ?: 0
+        val currentContentBottom = deepestVisibleChildBottom(card)
+        val desiredHeight = maxOf(previewBottom, footerBottom, currentContentBottom) + dp(card, 1f)
+        if (desiredHeight <= dp(card, 34f)) {
+            return
         }
+        if (card.minimumHeight != 0) {
+            card.minimumHeight = 0
+        }
+        setLayoutHeight(card, desiredHeight)
     }
 
     private fun tuneContactCard(card: View) {
@@ -951,6 +988,8 @@ object ModernChatBubbleRenderer {
     }
 
     private fun tuneWebShareCard(card: View) {
+        val needsMeasuredTune = card.width <= dp(card, 34f) ||
+                (findViewByResourceName(card, "biy")?.height ?: 0) <= dp(card, 34f)
         setTextColorByName(card, "bjx", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
         setTextColorByName(card, "bju", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
         setTextColorByName(card, "bj2", 0xFF4F5850.toInt())
@@ -959,6 +998,10 @@ object ModernChatBubbleRenderer {
             findViewByResourceName(card, name)?.let { clearViewLayer(it) }
         }
         setWebSharePreviewStyle(card)
+        normalizeWebShareCardHeight(card)
+        if (needsMeasuredTune) {
+            scheduleWebShareMeasuredTune(card)
+        }
     }
 
     private fun setWebSharePreviewStyle(card: View) {
@@ -972,6 +1015,31 @@ object ModernChatBubbleRenderer {
         }
         panel.minimumHeight = 0
         clipRounded(panel, radiusDp = 12f)
+    }
+
+    private fun normalizeWebShareCardHeight(card: View) {
+        val content = findViewByResourceName(card, "biy") ?: return
+        val desiredHeight = content.bottom + dp(card, 1f)
+        if (desiredHeight <= dp(card, 34f)) {
+            return
+        }
+        if (card.minimumHeight != 0) {
+            card.minimumHeight = 0
+        }
+        setExactHeight(card, desiredHeight)
+    }
+
+    private fun scheduleWebShareMeasuredTune(card: View) {
+        if (XposedHelpers.getAdditionalInstanceField(card, keyPendingWebShareMeasuredTune) == true) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(card, keyPendingWebShareMeasuredTune, true)
+        card.post {
+            XposedHelpers.removeAdditionalInstanceField(card, keyPendingWebShareMeasuredTune)
+            if (card.visibility == View.VISIBLE) {
+                tuneWebShareCard(card)
+            }
+        }
     }
 
     private fun tunePaymentCard(card: View, dividerColor: Int, received: Boolean) {
@@ -1523,6 +1591,28 @@ object ModernChatBubbleRenderer {
         return result
     }
 
+    private fun deepestVisibleChildBottom(root: View): Int {
+        val group = root as? ViewGroup ?: return 0
+        var result = 0
+        fun visit(parent: ViewGroup, parentTop: Int, depth: Int) {
+            if (depth > 8 || parent.visibility != View.VISIBLE) {
+                return
+            }
+            for (index in 0 until parent.childCount) {
+                val child = parent.getChildAt(index)
+                if (child.visibility != View.VISIBLE) {
+                    continue
+                }
+                result = maxOf(result, parentTop + child.bottom)
+                (child as? ViewGroup)?.let {
+                    visit(it, parentTop + child.top, depth + 1)
+                }
+            }
+        }
+        visit(group, 0, 0)
+        return result
+    }
+
     private fun syncAvatarAndNicknameState(
         itemView: View,
         target: BubbleTarget,
@@ -1621,12 +1711,39 @@ object ModernChatBubbleRenderer {
                 applyTextPadding = true
             )
         }
+        findVideoBubbleTarget(itemView)?.let { return it }
         findImageBubbleTargetByStructure(itemView)?.let { return it }
         return if (enableGenericRichCardHeuristic) {
             findRichCardBubbleTarget(itemView)
         } else {
             null
         }
+    }
+
+    private fun findVideoBubbleTarget(itemView: View): BubbleTarget? {
+        if (findViewByResourceName(itemView, resourceVoiceBubble) != null) {
+            return null
+        }
+        val mediaBubble = findViewByResourceName(itemView, resourceCallBubble) ?: return null
+        val imageView = findViewByResourceName(mediaBubble, "bkm") as? ImageView ?: return null
+        val durationText = renderedText(findViewByResourceName(mediaBubble, "boy"))
+        val hasVideoChrome = !durationText.isNullOrBlank() ||
+                findViewByResourceName(mediaBubble, "bqy") != null
+        if (!hasVideoChrome) {
+            return null
+        }
+        if (!isLikelyChatImage(itemView, imageView)) {
+            return null
+        }
+        return BubbleTarget(
+            bubbleView = mediaBubble,
+            textView = null,
+            kind = "video",
+            applyTextPadding = false,
+            layoutView = mediaBubble,
+            signatureText = "video:${durationText.orEmpty()}:${mediaBubble.width}x${mediaBubble.height}",
+            clipToOutline = true
+        )
     }
 
     private fun findRedpacketBubbleTargetByStructure(itemView: View): BubbleTarget? {
@@ -2521,6 +2638,22 @@ object ModernChatBubbleRenderer {
         return location[1]
     }
 
+    private fun shouldDeferCompactTopEdgeTextItem(itemView: View, target: BubbleTarget): Boolean {
+        if (target.kind != "text") {
+            return false
+        }
+        val recycler = findRecyclerParent(itemView) ?: return false
+        val recyclerTop = screenTop(recycler)
+        val itemTop = screenTop(itemView)
+        val itemBottom = itemTop + itemView.height
+        val tolerance = dp(itemView, 1f)
+        val clippedThroughTop = itemTop < recyclerTop - tolerance &&
+                itemBottom > recyclerTop + tolerance
+        val compactAtTopEdge = itemTop <= recyclerTop + tolerance &&
+                itemView.height in 1..dp(itemView, 72f)
+        return clippedThroughTop || compactAtTopEdge
+    }
+
     private fun hasVisibleTimeSeparator(itemView: View): Boolean {
         val view = findViewByResourceName(itemView, resourceNickname) ?: return false
         return isTimeSeparatorView(view)
@@ -2739,7 +2872,8 @@ object ModernChatBubbleRenderer {
             "position",
             "mini-program",
             "rich-card" -> ChatBubbleStylePolicy.cardPalette()
-            "image" -> ChatBubbleStylePolicy.imagePalette()
+            "image",
+            "video" -> ChatBubbleStylePolicy.imagePalette()
             else -> base
         }
     }

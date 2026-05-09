@@ -267,11 +267,10 @@ object ChatBubbleStylePolicy {
     }
 
     fun shouldUpdateCachedPositionForNeighborGrowth(
-        side: Side,
         cachedPosition: GroupPosition,
         computedPosition: GroupPosition
     ): Boolean {
-        if (side != Side.RIGHT || cachedPosition == computedPosition) {
+        if (cachedPosition == computedPosition) {
             return false
         }
         return when (cachedPosition) {
@@ -422,6 +421,7 @@ object ChatBubbleStylePolicy {
     fun isStylableWechatBubbleMessage(type: Int?, content: String?): Boolean {
         return isTextLikeWechatMessage(type, content) ||
                 isImageWechatMessage(type, content) ||
+                isVideoWechatMessage(type, content) ||
                 isLocationWechatMessage(type, content) ||
                 isVoiceWechatMessage(type, content) ||
                 isCallWechatMessage(type, content) ||
@@ -434,6 +434,7 @@ object ChatBubbleStylePolicy {
             isVoiceWechatMessage(type, content) -> "voice"
             isCallWechatMessage(type, content) -> "call"
             isImageWechatMessage(type, content) -> "image"
+            isVideoWechatMessage(type, content) -> "image"
             isLocationWechatMessage(type, content) -> "location"
             isRichCardWechatMessage(type, content) -> "card"
             else -> null
@@ -488,6 +489,13 @@ object ChatBubbleStylePolicy {
             return true
         }
         return content?.indexOf("<img", ignoreCase = true) ?: -1 >= 0
+    }
+
+    private fun isVideoWechatMessage(type: Int?, content: String?): Boolean {
+        if (type == 43 || type == 62) {
+            return true
+        }
+        return content?.indexOf("<videomsg", ignoreCase = true) ?: -1 >= 0
     }
 
     private fun isLocationWechatMessage(type: Int?, content: String?): Boolean {

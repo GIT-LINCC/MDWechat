@@ -78,6 +78,13 @@ object ModernChatBubbleStyler {
             }
         }
     )
+    private val observedTimeSeparatorBeforeKeys = Collections.synchronizedMap(
+        object : LinkedHashMap<String, Boolean>(128, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean {
+                return size > 1200
+            }
+        }
+    )
 
     data class RenderContext(
         val state: ChatBubbleStylePolicy.RenderState,
@@ -454,13 +461,27 @@ object ModernChatBubbleStyler {
             anchorPosition = position
         ) ?: return null
         val current = window.byPosition[position]?.meta ?: return null
+        val currentIndex = window.entries.indexOfFirst { it.position == position }
+        val nextEntry = if (currentIndex >= 0) {
+            window.entries.getOrNull(currentIndex + 1)
+        } else {
+            null
+        }
+        if (hasTimeBeforeCurrent) {
+            rememberObservedTimeSeparatorBefore(current.stableKey)
+        }
+        if (hasTimeBeforeNext) {
+            rememberObservedTimeSeparatorBefore(nextEntry?.meta?.stableKey)
+        }
         val rows = window.entries.map { entry ->
             entry.meta.toMessageRow(
-                hasTimeSeparatorBefore = when (entry.position) {
-                    position -> hasTimeBeforeCurrent
-                    position + 1 -> hasTimeBeforeNext
-                    else -> false
-                }
+                hasTimeSeparatorBefore = hasTimeSeparatorBefore(
+                    entry = entry,
+                    currentStableKey = current.stableKey,
+                    hasTimeBeforeCurrent = hasTimeBeforeCurrent,
+                    nextStableKey = nextEntry?.meta?.stableKey,
+                    hasTimeBeforeNext = hasTimeBeforeNext
+                )
             )
         }
         return ChatBubbleStylePolicy.resolveRenderStates(rows)[current.stableKey]
@@ -482,10 +503,19 @@ object ModernChatBubbleStyler {
         val timeBeforeByPosition = matchedItems.associate { (visibleItem, matchedEntry) ->
             matchedEntry.position to visibleItem.info.hasTimeSeparator
         }
+        val timeBeforeByStableKey = matchedItems.associate { (visibleItem, matchedEntry) ->
+            matchedEntry.meta.stableKey to visibleItem.info.hasTimeSeparator
+        }
+        timeBeforeByStableKey
+            .filterValues { it }
+            .keys
+            .forEach { rememberObservedTimeSeparatorBefore(it) }
         val states = ChatBubbleStylePolicy.resolveRenderStates(
             window.entries.map { entry ->
                 entry.meta.toMessageRow(
-                    hasTimeSeparatorBefore = timeBeforeByPosition[entry.position] == true
+                    hasTimeSeparatorBefore = timeBeforeByPosition[entry.position] == true ||
+                            timeBeforeByStableKey[entry.meta.stableKey] == true ||
+                            hasObservedTimeSeparatorBefore(entry.meta.stableKey)
                 )
             }
         )
@@ -500,6 +530,28 @@ object ModernChatBubbleStyler {
 
     fun invalidateAdapterData(adapter: Any) {
         AdapterMessageReader.invalidate(adapter)
+    }
+
+    private fun rememberObservedTimeSeparatorBefore(stableKey: String?) {
+        if (!stableKey.isNullOrBlank()) {
+            observedTimeSeparatorBeforeKeys[stableKey] = true
+        }
+    }
+
+    private fun hasObservedTimeSeparatorBefore(stableKey: String): Boolean {
+        return observedTimeSeparatorBeforeKeys[stableKey] == true
+    }
+
+    private fun hasTimeSeparatorBefore(
+        entry: WindowEntry,
+        currentStableKey: String,
+        hasTimeBeforeCurrent: Boolean,
+        nextStableKey: String?,
+        hasTimeBeforeNext: Boolean
+    ): Boolean {
+        return entry.meta.stableKey == currentStableKey && hasTimeBeforeCurrent ||
+                entry.meta.stableKey == nextStableKey && hasTimeBeforeNext ||
+                hasObservedTimeSeparatorBefore(entry.meta.stableKey)
     }
 
     fun resolveRenderStateFromMessage(msgInfo: Any): ChatBubbleStylePolicy.RenderState? {
@@ -1429,7 +1481,6 @@ object ModernChatBubbleStyler {
         val cached = bubbleDecisionCache[stableKey]
         if (cached != null && cached.side == side) {
             val canGrowWithNewNeighbor = ChatBubbleStylePolicy.shouldUpdateCachedPositionForNeighborGrowth(
-                side = side,
                 cachedPosition = cached.position,
                 computedPosition = computedPosition
             )
