@@ -64,6 +64,10 @@ object ModernChatBubbleRenderer {
     private const val transferReferenceCardHeight = 115f
     private const val transferReferenceHeaderHeight = 69f
     private const val transferReferenceFooterHeight = 46f
+    private const val webShareContentHorizontalInsetDp = 4f
+    private const val webShareContentVerticalInsetDp = 12f
+    private const val webSharePreviewSizeDp = 56f
+    private const val webSharePreviewRadiusDp = 12f
     private const val probeFile = "native_bubble_renderer.txt"
     private const val enableRendererProbe = false
     private const val enableGenericRichCardHeuristic = false
@@ -94,6 +98,17 @@ object ModernChatBubbleRenderer {
         val view: View,
         val metrics: RichCardMetrics,
         val score: Int
+    )
+
+    private data class WebShareCardSignals(
+        val content: View,
+        val titleViews: List<View>,
+        val descriptionView: View?,
+        val previewPanel: View?,
+        val previewImage: ImageView?,
+        val footer: View?,
+        val footerText: View?,
+        val sourceIcon: View?
     )
 
     fun applyFromAdapterBind(adapter: Any, position: Int, itemView: View): Boolean {
@@ -511,6 +526,7 @@ object ModernChatBubbleRenderer {
         return kind == "mini-program" ||
                 kind == "contact-card" ||
                 kind == "position" ||
+                kind == "web-share" ||
                 kind == "rich-card" ||
                 kind == "transfer" ||
                 kind == "transfer-received" ||
@@ -522,6 +538,7 @@ object ModernChatBubbleRenderer {
             "mini-program" -> tuneMiniProgramCard(target.bubbleView)
             "contact-card" -> tuneContactCard(target.bubbleView)
             "position" -> tunePositionCard(target.bubbleView)
+            "web-share" -> tuneWebShareCard(target.bubbleView)
             "rich-card" -> tuneGenericCard(target.bubbleView)
             "transfer" -> tunePaymentCard(target.bubbleView, dividerColor = 0x33FFFFFF, received = false)
             "transfer-received" -> tunePaymentCard(target.bubbleView, dividerColor = 0x33E0852A, received = true)
@@ -531,9 +548,10 @@ object ModernChatBubbleRenderer {
 
     private fun tuneMiniProgramCard(card: View) {
         val needsMeasuredTune = card.width <= dp(card, 34f) || card.height <= dp(card, 34f)
-        setTextColorByName(card, "biu", 0xFF4F5850.toInt())
+        setTextColorByName(card, "biu", 0xFF667069.toInt())
         setTextColorByName(card, "biq", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
         setTextColorByName(card, "bit", 0xFF8F968E.toInt())
+        tuneMiniProgramHeader(card)
         tuneMiniProgramTitle(card)
         setMiniProgramPreviewStyle(card)
         tuneMiniProgramFooter(card)
@@ -553,6 +571,34 @@ object ModernChatBubbleRenderer {
             if (card.width > dp(card, 34f) && card.visibility == View.VISIBLE) {
                 tuneMiniProgramCard(card)
             }
+        }
+    }
+
+    private fun tuneMiniProgramHeader(card: View) {
+        val icon = findViewByResourceName(card, "bis") as? ImageView ?: return
+        val headerRow = icon.parent as? ViewGroup ?: return
+        headerRow.minimumHeight = 0
+        headerRow.setPadding(0, 0, 0, 0)
+        if (headerRow is LinearLayout) {
+            headerRow.gravity = (headerRow.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+        }
+        setInsetWidthAndMargins(
+            view = headerRow,
+            contentWidth = card.width,
+            left = dp(card, 17f),
+            right = dp(card, 17f)
+        )
+        setExactSize(icon, dp(card, 16f), dp(card, 16f))
+        setLeftMargin(icon, 0)
+        (findViewByResourceName(headerRow, "biu") as? TextView)?.let { appName ->
+            appName.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12f)
+            appName.includeFontPadding = false
+            appName.gravity = (appName.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+            setLeftMargin(appName, dp(card, 6f))
+        }
+        findViewByResourceName(headerRow, "bhq")?.let { assurance ->
+            assurance.alpha = 0.92f
+            setLeftMargin(assurance, dp(card, 6f))
         }
     }
 
@@ -614,7 +660,7 @@ object ModernChatBubbleRenderer {
     private fun tuneMiniProgramFooter(card: View) {
         val footer = findViewByResourceName(card, "bir") as? ViewGroup ?: return
         footer.minimumHeight = 0
-        setTopMargin(footer, dp(card, 10f))
+        setTopMargin(footer, dp(card, 17f))
         if (footer.childCount > 0) {
             tuneFixedCardDividerView(
                 view = footer.getChildAt(0),
@@ -626,14 +672,58 @@ object ModernChatBubbleRenderer {
         }
         if (footer.childCount > 1) {
             val footerRow = footer.getChildAt(1)
-            setTopMargin(footerRow, dp(card, 8f))
+            setTopMargin(footerRow, dp(card, 10f))
             setInsetWidthAndMargins(
                 view = footerRow,
                 contentWidth = card.width,
-                left = dp(card, 9f),
+                left = dp(card, 17f),
                 right = dp(card, 17f)
             )
+            tuneMiniProgramFooterSourceRow(card, footerRow)
         }
+    }
+
+    private fun tuneMiniProgramFooterSourceRow(card: View, footerRow: View) {
+        footerRow.minimumHeight = 0
+        footerRow.setPadding(0, 0, 0, 0)
+        if (footerRow is LinearLayout) {
+            footerRow.gravity = (footerRow.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+        }
+        val footerText = findViewByResourceName(footerRow, "bit") as? TextView ?: return
+        tuneMiniProgramFooterTextAlignment(footerText)
+        val sourceRow = footerText.parent as? ViewGroup ?: footerRow as? ViewGroup ?: return
+        if (sourceRow !== footerRow) {
+            sourceRow.minimumHeight = 0
+            sourceRow.setPadding(0, 0, 0, 0)
+            if (sourceRow is LinearLayout) {
+                sourceRow.gravity = (sourceRow.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+            }
+        }
+        findMiniProgramFooterSourceIcon(sourceRow, footerText)?.let { icon ->
+            setExactSize(icon, dp(card, 12f), dp(card, 12f))
+            setLeftMargin(icon, 0)
+        }
+        setLeftMargin(footerText, dp(card, 4f))
+    }
+
+    private fun tuneMiniProgramFooterTextAlignment(textView: TextView) {
+        textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11f)
+        textView.includeFontPadding = true
+        textView.gravity = (textView.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+        textView.setPadding(0, 0, 0, 0)
+        textView.setMinLines(0)
+        textView.setMinHeight(0)
+        textView.minimumHeight = 0
+    }
+
+    private fun findMiniProgramFooterSourceIcon(sourceRow: ViewGroup, footerText: View): View? {
+        for (index in 0 until sourceRow.childCount) {
+            val child = sourceRow.getChildAt(index)
+            if (child !== footerText && child is ImageView && child.visibility != View.GONE) {
+                return child
+            }
+        }
+        return null
     }
 
     private fun normalizeMiniProgramCardHeight(card: View) {
@@ -811,45 +901,183 @@ object ModernChatBubbleRenderer {
     }
 
     private fun tuneWebShareCard(card: View) {
+        val signals = findWebShareCardSignals(card) ?: return
         val needsMeasuredTune = card.width <= dp(card, 34f) ||
-                (findViewByResourceName(card, "biy")?.height ?: 0) <= dp(card, 34f)
-        setTextColorByName(card, "bjx", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
-        setTextColorByName(card, "bju", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
-        setTextColorByName(card, "bj2", 0xFF4F5850.toInt())
-        setTextColorByName(card, "bjp", 0xFF8F968E.toInt())
-        listOf("bjl", "bjp").forEach { name ->
-            findViewByResourceName(card, name)?.let { clearViewLayer(it) }
-        }
-        setWebSharePreviewStyle(card)
-        normalizeWebShareCardHeight(card)
+                signals.content.height <= dp(card, 34f)
+        tuneWebShareContentInsets(card, signals)
+        tuneWebShareText(signals)
+        signals.footer?.let { clearViewLayer(it) }
+        signals.footerText?.let { clearViewLayer(it) }
+        hideWebShareContentDividers(signals)
+        setWebSharePreviewStyle(card, signals)
+        tuneWebShareFooter(card, signals)
+        normalizeWebShareCardHeight(card, signals)
         if (needsMeasuredTune) {
             scheduleWebShareMeasuredTune(card)
         }
     }
 
-    private fun setWebSharePreviewStyle(card: View) {
-        val imageView = findViewByResourceName(card, "bjs") as? ImageView ?: return
-        val panel = findViewByResourceName(card, "bjr") ?: (imageView.parent as? View) ?: imageView
-        panel.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(0xFFF7F8F7.toInt())
-            setStroke(dp(card, 0.75f), 0x0F000000)
-            cornerRadius = dp(card, 12f).toFloat()
+    private fun tuneWebShareContentInsets(card: View, signals: WebShareCardSignals) {
+        val horizontalInset = dp(card, webShareContentHorizontalInsetDp)
+        val verticalInset = dp(card, webShareContentVerticalInsetDp)
+        val content = signals.content
+        if (content.paddingLeft != horizontalInset ||
+            content.paddingTop != verticalInset ||
+            content.paddingRight != horizontalInset ||
+            content.paddingBottom != verticalInset
+        ) {
+            content.setPadding(horizontalInset, verticalInset, horizontalInset, verticalInset)
         }
-        panel.minimumHeight = 0
-        clipRounded(panel, radiusDp = 12f)
     }
 
-    private fun normalizeWebShareCardHeight(card: View) {
-        val content = findViewByResourceName(card, "biy") ?: return
-        val desiredHeight = content.bottom + dp(card, 1f)
+    private fun tuneWebShareText(signals: WebShareCardSignals) {
+        signals.titleViews.forEach { title ->
+            tuneWebShareTextView(
+                view = title,
+                color = ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR,
+                maxLines = 2
+            )
+        }
+        signals.descriptionView?.let { description ->
+            tuneWebShareTextView(
+                view = description,
+                color = 0xFF667069.toInt(),
+                maxLines = 2
+            )
+        }
+        signals.footerText?.let { footer ->
+            tuneWebShareTextView(
+                view = footer,
+                color = 0xFF8F968E.toInt(),
+                maxLines = 1
+            )
+        }
+    }
+
+    private fun tuneWebShareTextView(view: View, color: Int, maxLines: Int) {
+        setTextColor(view, color, color)
+        val textView = view as? TextView ?: return
+        if (textView.maxLines != maxLines) {
+            textView.maxLines = maxLines
+        }
+        if (textView.ellipsize != TextUtils.TruncateAt.END) {
+            textView.ellipsize = TextUtils.TruncateAt.END
+        }
+        textView.setMinLines(0)
+        textView.setMinHeight(0)
+        textView.minimumHeight = 0
+    }
+
+    private fun setWebSharePreviewStyle(card: View, signals: WebShareCardSignals) {
+        val imageView = signals.previewImage ?: return
+        val panel = signals.previewPanel ?: imageView
+        val previewSize = dp(card, webSharePreviewSizeDp)
+        setExactSize(panel, previewSize, previewSize)
+        setLeftMargin(panel, dp(card, 12f))
+        if (panel !== imageView) {
+            setExactSize(imageView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        } else {
+            setExactSize(imageView, previewSize, previewSize)
+        }
+        panel.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(0xFFF5F5F5.toInt())
+            setStroke(dp(card, 0.75f), 0x14000000)
+            cornerRadius = dp(card, webSharePreviewRadiusDp).toFloat()
+        }
+        panel.setPadding(0, 0, 0, 0)
+        panel.minimumHeight = 0
+        if (imageView.scaleType != ImageView.ScaleType.CENTER_CROP) {
+            imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        clipRounded(panel, radiusDp = webSharePreviewRadiusDp)
+    }
+
+    private fun hideWebShareContentDividers(signals: WebShareCardSignals) {
+        val content = signals.content
+        val footer = signals.footer
+        fun visit(view: View, depth: Int) {
+            if (depth > 8 || view.visibility != View.VISIBLE) {
+                return
+            }
+            if (footer != null && view !== content && (view === footer || containsView(footer, view))) {
+                return
+            }
+            if (view !== content && isLikelyCardDivider(content, view, inset = 0)) {
+                clearViewLayer(view)
+                view.alpha = 0f
+                return
+            }
+            val group = view as? ViewGroup ?: return
+            for (index in 0 until group.childCount) {
+                visit(group.getChildAt(index), depth + 1)
+            }
+        }
+        visit(content, 0)
+    }
+
+    private fun tuneWebShareFooter(card: View, signals: WebShareCardSignals) {
+        val footer = signals.footer as? ViewGroup ?: return
+        footer.minimumHeight = 0
+        setTopMargin(footer, dp(card, 8f))
+        signals.sourceIcon?.let { icon ->
+            setExactSize(icon, dp(card, 14f), dp(card, 14f))
+        }
+        signals.footerText?.let { footerText ->
+            tuneWebShareFooterTextAlignment(footerText)
+            setLeftMargin(footerText, dp(card, 3f))
+        }
+        tuneWebShareFooterSourceRow(card, signals)
+        findWideThinImageView(footer)?.let { divider ->
+            val dividerParentWidth = (divider.parent as? View)?.width?.takeIf { it > 0 }
+                ?: footer.width
+            tuneFixedCardDividerView(
+                view = divider,
+                contentWidth = dividerParentWidth,
+                horizontalInset = 0,
+                dividerColor = 0x0F000000,
+                dividerHeight = dp(card, 1f)
+            )
+        }
+    }
+
+    private fun tuneWebShareFooterTextAlignment(view: View) {
+        val textView = view as? TextView ?: return
+        textView.includeFontPadding = false
+        textView.gravity = (textView.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+        textView.setPadding(0, 0, 0, 0)
+    }
+
+    private fun tuneWebShareFooterSourceRow(card: View, signals: WebShareCardSignals) {
+        val iconParent = signals.sourceIcon?.parent as? View
+        val textParent = signals.footerText?.parent as? View
+        if (iconParent == null || iconParent !== textParent) {
+            return
+        }
+        iconParent.minimumHeight = 0
+        iconParent.setPadding(0, 0, 0, 0)
+        setTopMargin(iconParent, dp(card, 8f))
+        if (iconParent is LinearLayout) {
+            iconParent.gravity = (iconParent.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+        }
+    }
+
+    private fun normalizeWebShareCardHeight(card: View, signals: WebShareCardSignals) {
+        if (card.width <= dp(card, 34f)) {
+            return
+        }
+        val contentBottom = maxOf(
+            signals.content.bottom.takeIf { it > 0 } ?: 0,
+            deepestVisibleChildBottom(card)
+        )
+        val desiredHeight = contentBottom + dp(card, 1f)
         if (desiredHeight <= dp(card, 34f)) {
             return
         }
         if (card.minimumHeight != 0) {
             card.minimumHeight = 0
         }
-        setExactHeight(card, desiredHeight)
+        setLayoutHeight(card, desiredHeight)
     }
 
     private fun scheduleWebShareMeasuredTune(card: View) {
@@ -859,7 +1087,12 @@ object ModernChatBubbleRenderer {
         XposedHelpers.setAdditionalInstanceField(card, keyPendingWebShareMeasuredTune, true)
         card.post {
             XposedHelpers.removeAdditionalInstanceField(card, keyPendingWebShareMeasuredTune)
-            if (card.visibility == View.VISIBLE) {
+            val signals = if (card.visibility == View.VISIBLE && card.width > dp(card, 34f)) {
+                findWebShareCardSignals(card)
+            } else {
+                null
+            }
+            if (signals != null && signals.content.height > dp(card, 34f)) {
                 tuneWebShareCard(card)
             }
         }
@@ -1792,12 +2025,11 @@ object ModernChatBubbleRenderer {
 
         private fun classifyKind(fallback: String, text: String, target: View): String {
             val hasMiniProgramFooter = hasMiniProgramFooterSignal(target)
-            val hasWebShareSignals = findViewByResourceName(target, "biy") != null &&
-                    hasAnyResourceName(target, "bjx", "bju", "bjr", "bjs", "bjl", "bjp")
+            val hasWebShareSignals = hasWebShareCardSignals(target)
             if (fallback == "mini-program") {
                 return when {
                     hasMiniProgramFooter -> "mini-program"
-                    hasWebShareSignals -> "rich-card"
+                    hasWebShareSignals -> "web-share"
                     else -> "mini-program"
                 }
             }
@@ -1811,7 +2043,7 @@ object ModernChatBubbleRenderer {
                 ChatBubbleStylePolicy.hasRedpacketCardTextSignal(text) -> "redpacket"
                 hasMiniProgramFooter -> "mini-program"
                 text.contains("个人名片") || text.contains("名片") -> "contact-card"
-                hasWebShareSignals -> "rich-card"
+                hasWebShareSignals -> "web-share"
                 else -> fallback
             }
         }
@@ -1835,13 +2067,7 @@ object ModernChatBubbleRenderer {
                         findViewByResourceName(target, "gbh") != null)
         val hasTransferTextSignal = hasTransferTextSignal(sample)
         val hasMiniProgramFooter = hasMiniProgramFooterSignal(target)
-        val hasWebShareSignals = hasAnyResourceName(
-            target,
-            "bju",
-            "bj2",
-            "bjr",
-            "bjs"
-        )
+        val hasWebShareSignals = hasWebShareCardSignals(target)
         if (!hasTransferOrGenericCardSignals &&
             !hasModernTransferSignals &&
             !hasTransferTextSignal &&
@@ -1885,7 +2111,7 @@ object ModernChatBubbleRenderer {
             hasMiniProgramFooter -> "mini-program"
             ChatBubbleStylePolicy.hasRedpacketCardTextSignal(text) -> "redpacket"
             text.contains("个人名片") || text.contains("名片") -> "contact-card"
-            hasWebShareSignals -> "rich-card"
+            hasWebShareSignals -> "web-share"
             else -> "rich-card"
         }
     }
@@ -2271,12 +2497,78 @@ object ModernChatBubbleRenderer {
             .takeIf { it.isNotBlank() }
     }
 
-    private fun hasMiniProgramFooterSignal(root: View): Boolean {
-        val footer = findViewByResourceName(root, "bit") ?: return false
-        if (!isVisibleDescendant(root, footer)) {
-            return false
+    private fun hasWebShareCardSignals(root: View): Boolean {
+        return findWebShareCardSignals(root) != null
+    }
+
+    private fun findWebShareCardSignals(root: View): WebShareCardSignals? {
+        if (hasMiniProgramCardSignal(root)) {
+            return null
         }
+        val content = findVisibleViewByResourceName(root, "biy") ?: return null
+        val titleViews = listOfNotNull(
+            findVisibleViewByResourceName(root, "bjx", content),
+            findVisibleViewByResourceName(root, "bju", content)
+        )
+        val description = findVisibleViewByResourceName(root, "bj2", content)
+        val previewImage = findVisibleViewByResourceName(root, "bjs", content) as? ImageView
+        val previewPanel = findVisibleViewByResourceName(root, "bjr", content)
+            ?.takeIf { previewImage == null || containsView(it, previewImage) }
+            ?: (previewImage?.parent as? View)?.takeIf { containsView(content, it) }
+        val footer = findVisibleViewByResourceName(root, "bjl", content)
+        val footerText = footer?.let { findVisibleViewByResourceName(root, "bjp", it) }
+        val sourceIcon = footer?.let { findVisibleViewByResourceName(root, "bjm", it) }
+        val hasHeaderText = titleViews.any { hasReadableText(it) } || hasReadableText(description)
+        val hasPreview = previewPanel != null || previewImage != null
+        val hasFooter = footer != null && footerText != null
+        if (!hasHeaderText || (!hasPreview && !hasFooter)) {
+            return null
+        }
+        return WebShareCardSignals(
+            content = content,
+            titleViews = titleViews,
+            descriptionView = description,
+            previewPanel = previewPanel,
+            previewImage = previewImage,
+            footer = footer,
+            footerText = footerText,
+            sourceIcon = sourceIcon
+        )
+    }
+
+    private fun hasMiniProgramCardSignal(root: View): Boolean {
+        return hasMiniProgramFooterSignal(root) ||
+                findVisibleViewByResourceName(root, "biq") != null ||
+                findVisibleViewByResourceName(root, "big") != null ||
+                findVisibleViewByResourceName(root, "bir") != null ||
+                findVisibleViewByResourceName(root, "bit") != null
+    }
+
+    private fun hasMiniProgramFooterSignal(root: View): Boolean {
+        val footer = findVisibleViewByResourceName(root, "bit") ?: return false
         return renderedText(footer)?.trim() == "小程序"
+    }
+
+    private fun findVisibleViewByResourceName(root: View, name: String, within: View? = null): View? {
+        val id = resourceId(root, name)
+        if (id == 0) {
+            return null
+        }
+        return findVisibleViewById(current = root, id = id, within = within, visibilityRoot = root)
+    }
+
+    private fun findVisibleViewById(current: View, id: Int, within: View?, visibilityRoot: View): View? {
+        if (current.id == id &&
+            isVisibleDescendant(visibilityRoot, current) &&
+            (within == null || containsView(within, current))
+        ) {
+            return current
+        }
+        val group = current as? ViewGroup ?: return null
+        for (index in 0 until group.childCount) {
+            findVisibleViewById(group.getChildAt(index), id, within, visibilityRoot)?.let { return it }
+        }
+        return null
     }
 
     private fun hasAnyResourceName(root: View, vararg names: String): Boolean {
@@ -2809,6 +3101,7 @@ object ModernChatBubbleRenderer {
             "contact-card",
             "position",
             "mini-program",
+            "web-share",
             "rich-card" -> ChatBubbleStylePolicy.cardPalette()
             "image",
             "video" -> ChatBubbleStylePolicy.imagePalette()
