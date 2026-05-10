@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import android.widget.Toast
+import com.blanke.mdwechat.Common
 import com.blanke.mdwechat.Objects.Main.context
 import com.blanke.mdwechat.config.AppCustomConfig
 import com.blanke.mdwechat.config.HookConfig
@@ -32,20 +33,51 @@ object LogUtil {
         try {
             if (HookConfig.is_hook_log_xposed) {
                 XposedBridge.log("MDWechatModule: " + log)
-                return
             }
         } catch (e: Exception) {
         }
-        val logFile = File(AppCustomConfig.getLogFile(dateStr))
-        logFile.parentFile.mkdirs()
         val time = SimpleDateFormat("HH:mm:ss").format(Date())
-        FileUtils.write(logFile.absolutePath, "$time $log\n", true)
-
+        val line = "$time $log\n"
+        writeLogLine(File(AppCustomConfig.getLogFile(dateStr)), line)
+        writeAppExternalLogLine("MDWechat_log_$dateStr.txt", line)
     }
 
-    fun clearFileLogs(isLogFile: Boolean = false) {
+    private fun writeLogLine(file: File, line: String) {
+        try {
+            file.parentFile?.mkdirs()
+            FileUtils.write(file.absolutePath, line, true)
+        } catch (t: Throwable) {
+            try {
+                XposedBridge.log(t)
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    private fun writeAppExternalLogLine(fileName: String, line: String) {
+        val appContext = context ?: return
+        try {
+            val baseDir = appContext.getExternalFilesDir(null) ?: return
+            val logDir = File(baseDir, Common.APP_DIR + File.separator + Common.LOGS_DIR)
+            writeLogLine(File(logDir, fileName), line)
+        } catch (t: Throwable) {
+            try {
+                XposedBridge.log(t)
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    fun clearFileLogs(isLogFile: Boolean = false, appContext: android.content.Context? = null) {
         val logFile = File(AppCustomConfig.getLogFile("MDWechat_log")).parentFile
         FileUtils.deleteDirectoryFiles(logFile, "MDWechat_log_")
+        appContext?.getExternalFilesDir(null)?.let { baseDir ->
+            FileUtils.deleteDirectoryFiles(
+                    File(baseDir, Common.APP_DIR + File.separator + Common.LOGS_DIR),
+                    "MDWechat_log_"
+            )
+        }
+        RuntimeProbe.clear(appContext ?: context)
 //        val result = logFile.delete()
         logFile.mkdirs()
         if (isLogFile) {

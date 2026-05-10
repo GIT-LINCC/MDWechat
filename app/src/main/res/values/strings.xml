@@ -267,19 +267,19 @@
     <string name="text_mini_program_title">下拉小程序后底端显示文字</string>
     <string name="value_mini_program_title">点击收起列表</string>
     <string name="summary_mini_program_title">当前文字：点击收起列表</string>
-    <string name="text_settings_debug">调试</string>
+    <string name="text_settings_debug">调试与诊断</string>
     <string name="key_hook_log">key_hook_log</string>
-    <string name="text_hook_log">日志记录</string>
-    <string name="text_hook_log_info">打开日志开关会在 手机存储/mdwechat/logs 下生成日志文件，谨慎打开，会导致运行变卡顿</string>
+    <string name="text_hook_log">模块文件日志</string>
+    <string name="text_hook_log_info">记录模块加载和异常信息，优先写入 /sdcard/mdwechat/logs；调试抓取脚本也会读取微信应用目录下的 mdwechat/logs。</string>
     <string name="key_hook_log_xposed">key_hook_log_xposed</string>
-    <string name="text_hook_log_xposed">记录到xposed日志中</string>
-    <string name="text_hook_log_xposed_info">变更日志记录地点至xposed日志，如果上面的文件夹中日志为空可以打开此选项。</string>
+    <string name="text_hook_log_xposed">同时写入 LSPosed 日志</string>
+    <string name="text_hook_log_xposed_info">保留文件日志，同时额外镜像到 LSPosed/Xposed 日志；部分系统 logcat 不可靠时仍以文件日志为准。</string>
     <string name="key_hook_debug">key_hook_debug</string>
-    <string name="text_hook_debug">记录详细日志</string>
-    <string name="text_hook_debug_info">会让微信变得巨卡，没事别开。</string>
+    <string name="text_hook_debug">点击视图树诊断</string>
+    <string name="text_hook_debug_info">点击控件时记录视图树，定位页面结构时临时开启；会明显影响流畅度。</string>
     <string name="key_hook_debug2">key_hook_debug2</string>
-    <string name="text_hook_debug2">记录详细日志 plus</string>
-    <string name="text_hook_debug_info2">会变成PPT模式，没事别开。</string>
+    <string name="text_hook_debug2">父级视图树诊断</string>
+    <string name="text_hook_debug_info2">在点击视图树基础上追加父级链路，信息量很大，只用于短时间定位复杂问题。</string>
     <string name="key_generate_wechat_config">key_generate_view_config</string>
     <string name="text_generate_wechat_config">生成本机微信配置文件</string>
     <string name="text_generate_wechat_config_info">根据当前安装微信版本自动生成适配文件，第一次使用/升级微信版本必须重新生成！！</string>
@@ -349,7 +349,7 @@
     <string name="text_color_tip_num_in_guide">消息提示中的数字颜色</string>
 
     <string name="key_clear_logs">key_clear_logs</string>
-    <string name="text_clear_logs">清空日志</string>
+    <string name="text_clear_logs">清空日志和探针</string>
     <string name="navigate">导航</string>
     <!--    <string name="instruction">教程</string>-->
     <string name="help">使用指南</string>

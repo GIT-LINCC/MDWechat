@@ -58,8 +58,10 @@ object ModernChatBubbleStyler {
     private const val maxVisibleClusterItems = 8
     private const val bubbleProbeFile = "chat_bubble_probe.txt"
     private const val debugProbeFile = "chat_bubble_debug.txt"
+    private const val avatarProbeFile = "chat_bubble_avatar_probe.txt"
     private const val enableVerboseBubbleProbe = false
     private const val enableDebugBubbleProbe = false
+    private const val enableAvatarGroupingProbe = false
     private val legacyAppendRefreshDelaysMs = longArrayOf(80L, 220L, 520L, 900L)
 
     private val shadowColor = Color.argb(32, 0, 0, 0)
@@ -69,7 +71,15 @@ object ModernChatBubbleStyler {
     private val chatItemProbeLogs = mutableSetOf<String>()
     private val styleProbeLogs = mutableSetOf<String>()
     private val layoutProbeLogs = mutableSetOf<String>()
+    private val avatarProbeLogs = mutableSetOf<String>()
     private val debugProbeLogs = mutableSetOf<String>()
+    private val observedTimeSeparatorByStableKey = Collections.synchronizedMap(
+        object : LinkedHashMap<String, Boolean>(512, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean {
+                return size > 2048
+            }
+        }
+    )
     private val messageViewIdCache = Collections.synchronizedMap(WeakHashMap<Context, Int>())
     private val bubbleDecisionCache = Collections.synchronizedMap(
         object : LinkedHashMap<String, BubbleDecision>(256, 0.75f, true) {
@@ -78,14 +88,6 @@ object ModernChatBubbleStyler {
             }
         }
     )
-    private val observedTimeSeparatorBeforeKeys = Collections.synchronizedMap(
-        object : LinkedHashMap<String, Boolean>(128, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean {
-                return size > 1200
-            }
-        }
-    )
-
     data class RenderContext(
         val state: ChatBubbleStylePolicy.RenderState,
         val adapter: Any?,
@@ -228,7 +230,12 @@ object ModernChatBubbleStyler {
             return false
         }
         val normalizedItem = findItemRoot(itemView) ?: itemView
-        val decision = computeDecisionFromAdapter(adapter, position) ?: return false
+        val state = resolveRenderStateFromVisibleAdapterItem(adapter, position, normalizedItem)
+        val decision = if (state != null) {
+            BubbleDecision(state.side, state.position, false)
+        } else {
+            computeDecisionFromAdapter(adapter, position)
+        } ?: return false
         setPendingDecision(normalizedItem, decision)
         return true
     }
@@ -242,6 +249,21 @@ object ModernChatBubbleStyler {
         if (info == null) {
             diagnoseRejectedItem(normalizedItem)
             return false
+        }
+        resolveRenderStateFromVisibleAdapterItem(adapter, position, normalizedItem)?.let { state ->
+            rememberBoundRenderStateOnView(adapter, position, state.stableKey, normalizedItem)
+            rememberBoundRenderStateOnView(adapter, position, state.stableKey, info.messageView)
+            applyMessageVisuals(
+                msgView = info.messageView,
+                side = state.side,
+                position = state.position,
+                stableKey = state.stableKey,
+                itemView = info.itemView,
+                marginTarget = info.messageView.parent as? View ?: info.itemView,
+                avatarView = info.avatarView,
+                nicknameView = info.nicknameView
+            )
+            return true
         }
         val window = AdapterMessageReader.readWindow(
             adapter = adapter,
@@ -346,7 +368,7 @@ object ModernChatBubbleStyler {
         itemView.postDelayed({
             val root = findItemRoot(itemView) ?: itemView
             val applied = applyFromAdapterBindAndVisibleNeighbors(adapter, position, root)
-            val state = if (applied) resolveRenderStateFromAdapter(adapter, position) else null
+            val state = if (applied) resolveRenderStateFromVisibleAdapterItem(adapter, position, root) else null
             val shouldRetry = state == null || state.position == GroupPosition.SINGLE
             if (shouldRetry && attempt + 1 < legacyAppendRefreshDelaysMs.size) {
                 scheduleLegacyAppendRefreshAttempt(adapter, position, root, attempt + 1)
@@ -432,8 +454,18 @@ object ModernChatBubbleStyler {
         XposedHelpers.setAdditionalInstanceField(view, keyBoundStableKey, stableKey)
     }
 
+    fun rememberedAdapterPosition(adapter: Any, itemView: View): Int? {
+        val normalizedItem = findItemRoot(itemView) ?: itemView
+        return readRememberedBoundState(normalizedItem, adapter)?.position
+    }
+
     fun extractRenderedText(view: View?): String? {
         return extractText(view)
+    }
+
+    fun hasVisibleTimeSeparatorBefore(itemView: View?): Boolean {
+        val root = itemView?.let { findItemRoot(it) ?: it } ?: return false
+        return findTimeSeparatorView(root) != null
     }
 
     fun resolveRenderStateFromAdapter(adapter: Any, position: Int): ChatBubbleStylePolicy.RenderState? {
@@ -445,11 +477,28 @@ object ModernChatBubbleStyler {
         )
     }
 
+    fun resolveRenderStateFromVisibleAdapterItem(
+        adapter: Any,
+        position: Int,
+        itemView: View
+    ): ChatBubbleStylePolicy.RenderState? {
+        val root = findItemRoot(itemView) ?: itemView
+        val nextRoot = adjacentVisibleItem(root, step = 1)?.let { findItemRoot(it) ?: it }
+        return resolveRenderStateFromAdapter(
+            adapter = adapter,
+            position = position,
+            hasTimeBeforeCurrent = hasVisibleTimeSeparatorBefore(root),
+            hasTimeBeforeNext = hasVisibleTimeSeparatorBefore(nextRoot),
+            probeContext = root.context
+        )
+    }
+
     fun resolveRenderStateFromAdapter(
         adapter: Any,
         position: Int,
         hasTimeBeforeCurrent: Boolean,
-        hasTimeBeforeNext: Boolean
+        hasTimeBeforeNext: Boolean,
+        probeContext: Context? = null
     ): ChatBubbleStylePolicy.RenderState? {
         if (!isEnabled || position < 0) {
             return null
@@ -467,24 +516,38 @@ object ModernChatBubbleStyler {
         } else {
             null
         }
-        if (hasTimeBeforeCurrent) {
-            rememberObservedTimeSeparatorBefore(current.stableKey)
-        }
-        if (hasTimeBeforeNext) {
-            rememberObservedTimeSeparatorBefore(nextEntry?.meta?.stableKey)
-        }
+        rememberObservedTimeSeparator(current.stableKey, hasTimeBeforeCurrent)
+        val effectiveHasTimeBeforeCurrent = hasTimeBeforeCurrent ||
+                hasObservedTimeSeparator(current.stableKey)
+        val effectiveHasTimeBeforeNext = hasTimeBeforeNext ||
+                hasObservedTimeSeparator(nextEntry?.meta?.stableKey)
         val rows = window.entries.map { entry ->
             entry.meta.toMessageRow(
                 hasTimeSeparatorBefore = hasTimeSeparatorBefore(
                     entry = entry,
                     currentStableKey = current.stableKey,
-                    hasTimeBeforeCurrent = hasTimeBeforeCurrent,
+                    hasTimeBeforeCurrent = effectiveHasTimeBeforeCurrent,
                     nextStableKey = nextEntry?.meta?.stableKey,
-                    hasTimeBeforeNext = hasTimeBeforeNext
+                    hasTimeBeforeNext = effectiveHasTimeBeforeNext
                 )
             )
         }
-        return ChatBubbleStylePolicy.resolveRenderStates(rows)[current.stableKey]
+        val states = ChatBubbleStylePolicy.resolveRenderStates(rows)
+        val state = states[current.stableKey]
+        probeAvatarResolve(
+            context = probeContext,
+            label = "adapterState",
+            adapter = adapter,
+            source = window.sourceLabel,
+            position = position,
+            current = current,
+            previous = window.entries.getOrNull(currentIndex - 1)?.meta,
+            next = nextEntry?.meta,
+            hasTimeBeforeCurrent = effectiveHasTimeBeforeCurrent,
+            hasTimeBeforeNext = effectiveHasTimeBeforeNext,
+            state = state
+        )
+        return state
     }
 
     fun resolveVisibleRenderStatesFromAdapter(
@@ -494,11 +557,13 @@ object ModernChatBubbleStyler {
         if (!isEnabled) {
             return emptyList()
         }
+        val visibleAdapterItems = collectVisibleAdapterItems(recycler)
         val visibleItems = collectVisibleTextItems(recycler)
         if (visibleItems.isEmpty()) {
-            return emptyList()
+            return resolveVisibleAdapterItemsFromAdapter(adapter, visibleAdapterItems)
         }
-        val window = readWindowForVisibleResolution(adapter, visibleItems) ?: return emptyList()
+        val window = readWindowForVisibleResolution(adapter, visibleItems)
+            ?: return resolveVisibleAdapterItemsFromAdapter(adapter, visibleAdapterItems)
         val matchedItems = matchVisibleItems(window, visibleItems)
         val timeBeforeByPosition = matchedItems.associate { (visibleItem, matchedEntry) ->
             matchedEntry.position to visibleItem.info.hasTimeSeparator
@@ -506,40 +571,32 @@ object ModernChatBubbleStyler {
         val timeBeforeByStableKey = matchedItems.associate { (visibleItem, matchedEntry) ->
             matchedEntry.meta.stableKey to visibleItem.info.hasTimeSeparator
         }
-        timeBeforeByStableKey
-            .filterValues { it }
-            .keys
-            .forEach { rememberObservedTimeSeparatorBefore(it) }
         val states = ChatBubbleStylePolicy.resolveRenderStates(
             window.entries.map { entry ->
                 entry.meta.toMessageRow(
                     hasTimeSeparatorBefore = timeBeforeByPosition[entry.position] == true ||
-                            timeBeforeByStableKey[entry.meta.stableKey] == true ||
-                            hasObservedTimeSeparatorBefore(entry.meta.stableKey)
+                            timeBeforeByStableKey[entry.meta.stableKey] == true
                 )
             }
         )
         debugVisibleResolution(recycler, adapter, window, visibleItems, matchedItems, states)
-        return matchedItems.mapNotNull { (visibleItem, matchedEntry) ->
+        val appliedItemViews = Collections.newSetFromMap(IdentityHashMap<View, Boolean>())
+        val result = matchedItems.mapNotNull { (visibleItem, matchedEntry) ->
             rememberWindowEntry(adapter, visibleItem, matchedEntry)
+            appliedItemViews.add(visibleItem.itemView)
             states[matchedEntry.meta.stableKey]?.let { state ->
                 VisibleRenderState(visibleItem.itemView, state)
             }
         }
+        val mediaResults = resolveVisibleAdapterItemsFromAdapter(
+            adapter = adapter,
+            visibleItems = visibleAdapterItems.filterNot { appliedItemViews.contains(it.itemView) }
+        )
+        return result + mediaResults
     }
 
     fun invalidateAdapterData(adapter: Any) {
         AdapterMessageReader.invalidate(adapter)
-    }
-
-    private fun rememberObservedTimeSeparatorBefore(stableKey: String?) {
-        if (!stableKey.isNullOrBlank()) {
-            observedTimeSeparatorBeforeKeys[stableKey] = true
-        }
-    }
-
-    private fun hasObservedTimeSeparatorBefore(stableKey: String): Boolean {
-        return observedTimeSeparatorBeforeKeys[stableKey] == true
     }
 
     private fun hasTimeSeparatorBefore(
@@ -550,8 +607,24 @@ object ModernChatBubbleStyler {
         hasTimeBeforeNext: Boolean
     ): Boolean {
         return entry.meta.stableKey == currentStableKey && hasTimeBeforeCurrent ||
-                entry.meta.stableKey == nextStableKey && hasTimeBeforeNext ||
-                hasObservedTimeSeparatorBefore(entry.meta.stableKey)
+                entry.meta.stableKey == nextStableKey && hasTimeBeforeNext
+    }
+
+    private fun rememberObservedTimeSeparators(timeBeforeByStableKey: Map<String, Boolean>) {
+        timeBeforeByStableKey.forEach { (stableKey, hasTimeSeparator) ->
+            rememberObservedTimeSeparator(stableKey, hasTimeSeparator)
+        }
+    }
+
+    private fun rememberObservedTimeSeparator(stableKey: String?, hasTimeSeparator: Boolean) {
+        if (!hasTimeSeparator || stableKey.isNullOrBlank()) {
+            return
+        }
+        observedTimeSeparatorByStableKey[stableKey] = true
+    }
+
+    private fun hasObservedTimeSeparator(stableKey: String?): Boolean {
+        return !stableKey.isNullOrBlank() && observedTimeSeparatorByStableKey[stableKey] == true
     }
 
     fun resolveRenderStateFromMessage(msgInfo: Any): ChatBubbleStylePolicy.RenderState? {
@@ -590,7 +663,7 @@ object ModernChatBubbleStyler {
             readAdapterPositionFromHolder(holder)
         }
         if (adapter != null && position >= 0) {
-            resolveRenderStateFromAdapter(adapter, position)?.let {
+            resolveRenderStateFromVisibleAdapterItem(adapter, position, itemView)?.let {
                 return RenderContext(it, adapter, position)
             }
         }
@@ -738,7 +811,22 @@ object ModernChatBubbleStyler {
         }
 
         val matchedItems = matchVisibleItems(window, visibleItems)
-        debugVisibleResolution(recycler, adapter, window, visibleItems, matchedItems, states = null)
+        val timeBeforeByPosition = matchedItems.associate { (visibleItem, matchedEntry) ->
+            matchedEntry.position to visibleItem.info.hasTimeSeparator
+        }
+        val timeBeforeByStableKey = matchedItems.associate { (visibleItem, matchedEntry) ->
+            matchedEntry.meta.stableKey to visibleItem.info.hasTimeSeparator
+        }
+        rememberObservedTimeSeparators(timeBeforeByStableKey)
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            window.entries.map { entry ->
+                entry.meta.toMessageRow(
+                    hasTimeSeparatorBefore = timeBeforeByPosition[entry.position] == true ||
+                            timeBeforeByStableKey[entry.meta.stableKey] == true
+                )
+            }
+        )
+        debugVisibleResolution(recycler, adapter, window, visibleItems, matchedItems, states)
         val visibleByMatchedPosition = matchedItems.associate { (visibleItem, matchedEntry) ->
             matchedEntry.position to visibleItem
         }
@@ -748,6 +836,21 @@ object ModernChatBubbleStyler {
         var applied = 0
         for ((visibleItem, matchedEntry) in matchedItems) {
             rememberWindowEntry(adapter, visibleItem, matchedEntry)
+            val state = states[matchedEntry.meta.stableKey]
+            if (state != null) {
+                applyMessageVisuals(
+                    msgView = visibleItem.info.messageView,
+                    side = state.side,
+                    position = state.position,
+                    stableKey = state.stableKey,
+                    itemView = visibleItem.info.itemView,
+                    marginTarget = visibleItem.info.messageView.parent as? View ?: visibleItem.info.itemView,
+                    avatarView = visibleItem.info.avatarView,
+                    nicknameView = visibleItem.info.nicknameView
+                )
+                applied++
+                continue
+            }
             val hasTimeBeforeNext = visibleByMatchedPosition[matchedEntry.position + 1]
                 ?.info
                 ?.hasTimeSeparator == true
@@ -808,6 +911,128 @@ object ModernChatBubbleStyler {
         )
     }
 
+    private fun resolveVisibleAdapterItemsFromAdapter(
+        adapter: Any,
+        visibleItems: List<VisibleAdapterItem>
+    ): List<VisibleRenderState> {
+        if (visibleItems.isEmpty()) {
+            return emptyList()
+        }
+        val positions = visibleItems.map { it.requestPosition }.filter { it >= 0 }
+        if (positions.isEmpty()) {
+            return emptyList()
+        }
+        val minPosition = positions.minOrNull() ?: return emptyList()
+        val maxPosition = positions.maxOrNull() ?: return emptyList()
+        val window = AdapterMessageReader.readWindow(
+            adapter = adapter,
+            startPosition = minPosition - adapterWindowPadding,
+            endPosition = maxPosition + adapterWindowPadding,
+            anchorPosition = minPosition
+        ) ?: return emptyList()
+        val timeBeforeByPosition = visibleItems.associate {
+            it.requestPosition to hasVisibleTimeSeparatorBefore(it.itemView)
+        }
+        val timeBeforeByStableKey = visibleItems.mapNotNull { item ->
+            val entry = window.byPosition[item.requestPosition] ?: return@mapNotNull null
+            entry.meta.stableKey to hasVisibleTimeSeparatorBefore(item.itemView)
+        }.toMap()
+        rememberObservedTimeSeparators(timeBeforeByStableKey)
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            window.entries.map { entry ->
+                entry.meta.toMessageRow(
+                    hasTimeSeparatorBefore = timeBeforeByPosition[entry.position] == true ||
+                            timeBeforeByStableKey[entry.meta.stableKey] == true ||
+                            hasObservedTimeSeparator(entry.meta.stableKey)
+                )
+            }
+        )
+        return visibleItems.mapNotNull { item ->
+            val entry = window.byPosition[item.requestPosition] ?: return@mapNotNull null
+            states[entry.meta.stableKey]?.let { state ->
+                probeAvatarResolve(
+                    context = item.itemView.context,
+                    label = "visibleAdapter",
+                    adapter = adapter,
+                    source = window.sourceLabel,
+                    position = item.requestPosition,
+                    current = entry.meta,
+                    previous = window.byPosition[item.requestPosition - 1]?.meta,
+                    next = window.byPosition[item.requestPosition + 1]?.meta,
+                    hasTimeBeforeCurrent = timeBeforeByPosition[item.requestPosition] == true,
+                    hasTimeBeforeNext = timeBeforeByPosition[item.requestPosition + 1] == true,
+                    state = state
+                )
+                rememberBoundRenderStateOnView(adapter, item.requestPosition, state.stableKey, item.itemView)
+                VisibleRenderState(item.itemView, state)
+            }
+        }
+    }
+
+    fun probeAvatarApply(
+        context: Context?,
+        source: String,
+        state: ChatBubbleStylePolicy.RenderState,
+        targetKind: String?,
+        hasTimeBefore: Boolean,
+        hasAvatarView: Boolean,
+        avatarVisibility: String,
+        nicknameText: String?,
+        text: String?,
+        itemBounds: String
+    ) {
+        if (!enableAvatarGroupingProbe) {
+            return
+        }
+        val key = "apply:${source.take(32)}:${state.stableKey}:${state.position}:$targetKind:$hasTimeBefore:$hasAvatarView:$avatarVisibility"
+        if (avatarProbeLogs.size >= 360 || !avatarProbeLogs.add(key)) {
+            return
+        }
+        RuntimeProbe.append(
+            context,
+            avatarProbeFile,
+            "AvatarProbe apply source=${source.take(80)} key=${state.stableKey.takeLast(12)} " +
+                    "side=${state.side} pos=${state.position} showAvatar=${state.showAvatar} " +
+                    "showNick=${state.showNickname} target=$targetKind timeBefore=$hasTimeBefore " +
+                    "hasAvatar=$hasAvatarView avatar=$avatarVisibility nick=${debugText(nicknameText)} " +
+                    "text=${debugText(text)} item=$itemBounds"
+        )
+    }
+
+    fun isAvatarGroupingProbeEnabled(): Boolean {
+        return enableAvatarGroupingProbe
+    }
+
+    private fun probeAvatarResolve(
+        context: Context?,
+        label: String,
+        adapter: Any,
+        source: String,
+        position: Int,
+        current: RowMeta?,
+        previous: RowMeta?,
+        next: RowMeta?,
+        hasTimeBeforeCurrent: Boolean,
+        hasTimeBeforeNext: Boolean,
+        state: ChatBubbleStylePolicy.RenderState?
+    ) {
+        if (!enableAvatarGroupingProbe) {
+            return
+        }
+        val key = "resolve:$label:${adapter.javaClass.name}:$position:${current?.stableKey}:${state?.position}:$hasTimeBeforeCurrent:$hasTimeBeforeNext"
+        if (avatarProbeLogs.size >= 360 || !avatarProbeLogs.add(key)) {
+            return
+        }
+        RuntimeProbe.append(
+            context,
+            avatarProbeFile,
+            "AvatarProbe resolve label=$label adapter=${adapter.javaClass.name.takeLast(48)} source=$source " +
+                    "pos=$position state=${state?.position} showAvatar=${state?.showAvatar} " +
+                    "timeCur=$hasTimeBeforeCurrent timeNext=$hasTimeBeforeNext " +
+                    "prev=${debugMeta(previous)} cur=${debugMeta(current)} next=${debugMeta(next)}"
+        )
+    }
+
     private fun rememberWindowEntry(adapter: Any, visibleItem: VisibleTextItem, entry: WindowEntry) {
         rememberBoundRenderStateOnView(adapter, entry.position, entry.meta.stableKey, visibleItem.itemView)
         rememberBoundRenderStateOnView(adapter, entry.position, entry.meta.stableKey, visibleItem.info.messageView)
@@ -825,6 +1050,21 @@ object ModernChatBubbleStyler {
                 ?: -1
             val info = readDirectTextItemInfo(itemView) ?: continue
             result += VisibleTextItem(position, index, itemView, info, bound?.stableKey)
+        }
+        return result
+    }
+
+    private fun collectVisibleAdapterItems(recycler: ViewGroup): List<VisibleAdapterItem> {
+        val result = mutableListOf<VisibleAdapterItem>()
+        val adapter = getRecyclerAdapter(recycler)
+        for (index in 0 until recycler.childCount) {
+            val child = recycler.getChildAt(index)
+            val itemView = findItemRoot(child) ?: continue
+            val bound = readRememberedBoundState(itemView, adapter)
+            val position = getChildAdapterPosition(recycler, child).takeIf { it >= 0 }
+                ?: bound?.position
+                ?: continue
+            result += VisibleAdapterItem(position, index, itemView, bound?.stableKey)
         }
         return result
     }
@@ -2048,25 +2288,29 @@ object ModernChatBubbleStyler {
     }
 
     private fun isTimeSplit(older: RowMeta?, newer: RowMeta?): Boolean {
-        val olderTime = older?.createTimeMs ?: return false
-        val newerTime = newer?.createTimeMs ?: return false
+        val olderTime = older?.createTimeMs?.let { ChatBubbleStylePolicy.normalizeWechatCreateTimeMs(it) } ?: return false
+        val newerTime = newer?.createTimeMs?.let { ChatBubbleStylePolicy.normalizeWechatCreateTimeMs(it) } ?: return false
         return kotlin.math.abs(newerTime - olderTime) >= timeSeparatorGapMs
     }
 
     private fun findItemRoot(view: View): View? {
         val directRoot = findItemRootByResource(view)
-        if (directRoot != null && findViewByResourceName(directRoot, resourceMessage) != null) {
+        if (directRoot != null) {
             return directRoot
         }
-        val nestedRoot = findViewByResourceName(view, resourceItemRoot)
-        if (nestedRoot != null && findViewByResourceName(nestedRoot, resourceMessage) != null) {
+        val nestedRoot = if (!isRecyclerViewLike(view)) {
+            findViewByResourceName(view, resourceItemRoot)
+        } else {
+            null
+        }
+        if (nestedRoot != null) {
             return nestedRoot
         }
         var current: View? = view
         var depth = 0
         while (current != null && depth < 8) {
             val root = findItemRootByResource(current)
-            if (root != null && findViewByResourceName(root, resourceMessage) != null) {
+            if (root != null) {
                 return root
             }
             val parent = current.parent
@@ -2080,8 +2324,10 @@ object ModernChatBubbleStyler {
         if (getResourceEntryName(view) == resourceItemRoot) {
             return view
         }
-        findViewByResourceName(view, resourceItemRoot)?.let {
-            return it
+        if (!isRecyclerViewLike(view)) {
+            findViewByResourceName(view, resourceItemRoot)?.let {
+                return it
+            }
         }
         var current = view.parent as? View
         var depth = 0
@@ -2295,23 +2541,45 @@ object ModernChatBubbleStyler {
         } catch (_: Throwable) {
             0
         }
-        if (id == 0 || root !is ViewGroup) {
+        val itemRoot = when {
+            getResourceEntryName(root) == resourceItemRoot -> root
+            else -> findItemRootByResource(root) ?: root
+        }
+        val group = itemRoot as? ViewGroup
+        if (id == 0 || group == null) {
             return null
         }
-        return findTimeSeparatorView(root, id)
-    }
-
-    private fun findTimeSeparatorView(root: View, id: Int): View? {
-        if (root.id == id && looksLikeTimeSeparator(extractText(root))) {
-            return root
-        }
-        val group = root as? ViewGroup ?: return null
         for (index in 0 until group.childCount) {
-            findTimeSeparatorView(group.getChildAt(index), id)?.let {
-                return it
+            val child = group.getChildAt(index)
+            if (child.id == id &&
+                isRenderableTimeSeparatorView(child) &&
+                looksLikeTimeSeparator(extractText(child))
+            ) {
+                return child
             }
         }
         return null
+    }
+
+    private fun isRenderableTimeSeparatorView(view: View): Boolean {
+        if (view.visibility != View.VISIBLE || view.alpha <= 0.01f) {
+            return false
+        }
+        val params = view.layoutParams
+        if (params?.width == 0 || params?.height == 0) {
+            return false
+        }
+        if (view.width > 0 && view.height > 0) {
+            return true
+        }
+        if (view.measuredWidth > 0 && view.measuredHeight > 0) {
+            return true
+        }
+        return params == null ||
+                params.width == ViewGroup.LayoutParams.WRAP_CONTENT ||
+                params.width == ViewGroup.LayoutParams.MATCH_PARENT ||
+                params.height == ViewGroup.LayoutParams.WRAP_CONTENT ||
+                params.height == ViewGroup.LayoutParams.MATCH_PARENT
     }
 
     private fun looksLikeTimeSeparator(text: String?): Boolean {
@@ -3459,6 +3727,13 @@ object ModernChatBubbleStyler {
         val visibleIndex: Int,
         val itemView: View,
         val info: TextItemInfo,
+        val boundStableKey: String?
+    )
+
+    private data class VisibleAdapterItem(
+        val requestPosition: Int,
+        val visibleIndex: Int,
+        val itemView: View,
         val boundStableKey: String?
     )
 

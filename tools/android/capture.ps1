@@ -24,6 +24,7 @@ $filtered = Join-Path $OutDir 'logcat.filtered.txt'
 $logcatHealth = Join-Path $OutDir 'logcat-health.txt'
 $moduleState = Join-Path $OutDir 'module-state.txt'
 $windowState = Join-Path $OutDir 'window-state.txt'
+$probeDir = Join-Path $OutDir 'runtime-probes'
 
 Invoke-Adb shell 'screencap -p /sdcard/codex-capture.png'
 Invoke-Adb pull /sdcard/codex-capture.png $screenshot | Out-Null
@@ -84,9 +85,29 @@ $stateLines | Set-Content -LiteralPath $moduleState -Encoding UTF8
 Invoke-Adb shell 'dumpsys window windows 2>/dev/null | grep -E "mCurrentFocus|mFocusedApp|Window #" || true' |
     Set-Content -LiteralPath $windowState -Encoding UTF8
 
+New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+$probeRoots = @(
+    '/sdcard/mdwechat/logs',
+    "/sdcard/Android/data/$TargetPackage/files/mdwechat/logs"
+)
+foreach ($root in $probeRoots) {
+    $files = Invoke-Adb shell "ls $root/*.txt 2>/dev/null || true"
+    foreach ($file in @($files)) {
+        $path = ([string]$file).Trim()
+        if (-not $path.EndsWith('.txt')) {
+            continue
+        }
+        $name = Split-Path -Leaf $path
+        $prefix = ($root -replace '[^A-Za-z0-9]+', '-').Trim('-')
+        $out = Join-Path $probeDir "$prefix-$name"
+        Invoke-Adb exec-out cat $path | Set-Content -LiteralPath $out -Encoding UTF8
+    }
+}
+
 Write-Output "capture-dir=$OutDir"
 Write-Output "screenshot=$screenshot"
 Write-Output "window=$windowXml"
 Write-Output "filtered-log=$filtered"
 Write-Output "logcat-health=$logcatHealth"
 Write-Output "module-state=$moduleState"
+Write-Output "runtime-probes=$probeDir"

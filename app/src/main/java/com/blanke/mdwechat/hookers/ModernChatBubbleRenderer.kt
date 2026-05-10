@@ -46,14 +46,12 @@ object ModernChatBubbleRenderer {
     private const val resourceQuoteBackplate = "lgx"
     private const val keyOriginalAvatarHeight = "mdwechat_native_bubble_avatar_height"
     private const val keyAppliedSignature = "mdwechat_native_bubble_applied_signature"
-    private const val keyBoundaryRefreshSignature = "mdwechat_native_bubble_boundary_refresh_signature"
-    private const val keyPendingAppendRefresh = "mdwechat_native_bubble_pending_append_refresh"
-    private const val keyPendingAttachedReapply = "mdwechat_native_bubble_pending_attached_reapply"
     private const val keyPendingMiniProgramMeasuredTune = "mdwechat_native_bubble_pending_mini_program_measured_tune"
     private const val keyPendingContactMeasuredTune = "mdwechat_native_bubble_pending_contact_measured_tune"
     private const val keyPendingPaymentMeasuredTune = "mdwechat_native_bubble_pending_payment_measured_tune"
     private const val keyPendingPositionMeasuredTune = "mdwechat_native_bubble_pending_position_measured_tune"
     private const val keyPendingWebShareMeasuredTune = "mdwechat_native_bubble_pending_web_share_measured_tune"
+    private const val keyPendingRowChromeSync = "mdwechat_native_bubble_pending_row_chrome_sync"
     private const val miniProgramReferenceCardWidth = 260f
     private const val miniProgramReferenceCardHeight = 234.75f
     private const val contactReferenceCardWidth = 240f
@@ -66,11 +64,18 @@ object ModernChatBubbleRenderer {
     private const val transferReferenceCardHeight = 115f
     private const val transferReferenceHeaderHeight = 69f
     private const val transferReferenceFooterHeight = 46f
+    private const val webShareContentHorizontalInsetDp = 4f
+    private const val webShareContentVerticalInsetDp = 12f
+    private const val webSharePreviewSizeDp = 56f
+    private const val webSharePreviewRadiusDp = 12f
     private const val probeFile = "native_bubble_renderer.txt"
+    private const val mediaProbeFile = "native_bubble_media_probe.txt"
     private const val enableRendererProbe = false
+    private const val enableMediaBubbleProbe = true
     private const val enableGenericRichCardHeuristic = false
-    private val appendRefreshDelaysMs = longArrayOf(80L, 220L, 520L, 900L)
+    private val rowChromeSyncDelaysMs = longArrayOf(80L, 240L)
     private val probeKeys = mutableSetOf<String>()
+    private val mediaProbeKeys = mutableSetOf<String>()
     private val timeTextPattern = Regex("^\\d{1,2}:\\d{2}$")
     private val resourceIdCache = Collections.synchronizedMap(WeakHashMap<Context, MutableMap<String, Int>>())
 
@@ -98,16 +103,20 @@ object ModernChatBubbleRenderer {
         val score: Int
     )
 
+    private data class WebShareCardSignals(
+        val content: View,
+        val titleViews: List<View>,
+        val descriptionView: View?,
+        val previewPanel: View?,
+        val previewImage: ImageView?,
+        val footer: View?,
+        val footerText: View?,
+        val sourceIcon: View?
+    )
+
     fun applyFromAdapterBind(adapter: Any, position: Int, itemView: View): Boolean {
         val root = findItemRoot(itemView) ?: itemView
-        val splitBefore = hasVisibleTimeSeparator(root)
-        val splitAfter = nextVisibleItem(root)?.let { hasVisibleTimeSeparator(it) } == true
-        val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(
-            adapter = adapter,
-            position = position,
-            hasTimeBeforeCurrent = splitBefore,
-            hasTimeBeforeNext = splitAfter
-        )
+        val state = ModernChatBubbleStyler.resolveRenderStateFromVisibleAdapterItem(adapter, position, root)
         if (state == null) {
             probe(itemView, "adapter.noState:${adapter.javaClass.name}:$position")
             debug(itemView, "adapterBind noState adapter=${adapter.javaClass.name} pos=$position")
@@ -120,34 +129,8 @@ object ModernChatBubbleRenderer {
         )
         ModernChatBubbleStyler.rememberBoundRenderState(adapter, position, root, state)
         val applied = applyState(root, state, "adapter:${adapter.javaClass.simpleName}:$position")
-        scheduleAttachedReapplyIfNeeded(adapter, position, root, state)
-        if (applied) {
-            refreshPreviousItemAcrossTimeSeparator(adapter, position, root)
-            refreshVisibleNeighborItemsIfNeeded(adapter, position, root, state)
-        }
+        refreshVisibleNeighborItemsIfNeeded(adapter, position, root, state)
         return applied
-    }
-
-    private fun scheduleAttachedReapplyIfNeeded(
-        adapter: Any,
-        position: Int,
-        itemView: View,
-        state: ChatBubbleStylePolicy.RenderState
-    ) {
-        if (state.side != ChatBubbleStylePolicy.Side.LEFT ||
-            state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE ||
-            findRecyclerParent(itemView) != null ||
-            XposedHelpers.getAdditionalInstanceField(itemView, keyPendingAttachedReapply) == true
-        ) {
-            return
-        }
-        XposedHelpers.setAdditionalInstanceField(itemView, keyPendingAttachedReapply, true)
-        itemView.post {
-            XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingAttachedReapply)
-            if (findRecyclerParent(itemView) != null) {
-                applyFromAdapterBind(adapter, position, itemView)
-            }
-        }
     }
 
     fun applyVisibleChildrenFromAdapter(recycler: ViewGroup, adapter: Any): Int {
@@ -177,7 +160,7 @@ object ModernChatBubbleRenderer {
         }
         val applied = applyState(boundView, context.state, "chatItem:${msgInfo.javaClass.simpleName}")
         val itemView = findItemRoot(boundView) ?: boundView
-        if (applied && context.adapter != null && context.position >= 0) {
+        if (context.adapter != null && context.position >= 0) {
             refreshVisibleNeighborItemsIfNeeded(context.adapter, context.position, itemView, context.state)
         }
         return applied
@@ -191,30 +174,43 @@ object ModernChatBubbleRenderer {
         val itemView = findItemRoot(boundView) ?: boundView
         val target = findBubbleTarget(itemView)
         if (target == null) {
+            syncRowChromeState(itemView, target = null, state = state)
+            probeAvatarApplyState(itemView, target = null, state = state, source = "$source.noBubble", text = null)
             probe(boundView, "$source.noBubble:${boundView.javaClass.name}:${resourceName(boundView)}")
             debug(boundView, "$source noBubbleTarget item=${resourceName(itemView)}")
+            if (enableMediaBubbleProbe) {
+                probeNoBubbleMediaCandidateIfNeeded(itemView, state, source)
+            }
             return false
         }
         val bubbleView = target.bubbleView
         val text = renderTextForSignature(target)
         if (text.isNullOrBlank()) {
+            syncRowChromeState(itemView, target, state)
+            probeAvatarApplyState(itemView, target, state, "$source.noText", text)
             probe(bubbleView, "$source.noText:${bubbleView.javaClass.name}:${resourceName(bubbleView)}:${target.kind}")
             debug(itemView, "$source noText target=${resourceName(bubbleView)} kind=${target.kind}")
             return false
         }
         if (shouldDeferCompactTopEdgeTextItem(itemView, target)) {
+            syncRowChromeState(itemView, target, state)
+            probeAvatarApplyState(itemView, target, state, "$source.deferTop", text)
             debug(itemView, "$source deferTopEdgeText item=${boundsText(itemView)} text=${shortText(text)}")
             return false
         }
-        val renderState = applyVisibleBoundaries(itemView, state)
+        val renderState = state
         val palette = paletteForTarget(target, renderState)
         val signature = renderSignature(renderState, text, palette)
+        if (enableMediaBubbleProbe) {
+            probeMediaTargetIfNeeded(itemView, target, renderState, source, text)
+        }
         if (isCurrentRender(itemView, bubbleView, renderState, signature)) {
             syncReusableState(itemView, target, renderState)
             tuneRichCardContent(target)
             tuneMediaContent(target)
             debugApply(itemView, bubbleView, renderState, source, text, "current")
-            scheduleBoundaryRefresh(itemView, state, renderState, source)
+            probeAvatarApplyState(itemView, target, renderState, "$source.current", text)
+            scheduleRowChromeSyncIfNeeded(itemView, target, renderState, source)
             return true
         }
         clearOriginalBubbleContainers(bubbleView)
@@ -264,7 +260,8 @@ object ModernChatBubbleRenderer {
         XposedHelpers.setAdditionalInstanceField(itemView, keyAppliedSignature, signature)
         probe(bubbleView, "$source.applied:${renderState.side}:${renderState.position}:${target.kind}:${text.take(16)}")
         debugApply(itemView, bubbleView, renderState, source, text, "applied")
-        scheduleBoundaryRefresh(itemView, state, renderState, source)
+        probeAvatarApplyState(itemView, target, renderState, "$source.applied", text)
+        scheduleRowChromeSyncIfNeeded(itemView, target, renderState, source)
         return true
     }
 
@@ -274,199 +271,56 @@ object ModernChatBubbleRenderer {
         itemView: View,
         state: ChatBubbleStylePolicy.RenderState
     ) {
-        if (state.side != ChatBubbleStylePolicy.Side.RIGHT) {
-            return
-        }
         val appliedPosition = (findBubbleTarget(itemView)?.bubbleView?.background as? ModernBubbleDrawable)?.position
             ?: state.position
-        if (appliedPosition == ChatBubbleStylePolicy.GroupPosition.SINGLE) {
+        val shouldRefreshGroupNeighbors = state.side == ChatBubbleStylePolicy.Side.RIGHT &&
+                appliedPosition != ChatBubbleStylePolicy.GroupPosition.SINGLE
+        val shouldRefreshPreviousBoundary = ModernChatBubbleStyler.hasVisibleTimeSeparatorBefore(itemView)
+        if (!shouldRefreshGroupNeighbors && !shouldRefreshPreviousBoundary) {
             return
         }
         refreshVisibleNeighborItem(
             adapter = adapter,
             position = position - 1,
             itemView = adjacentVisibleItem(itemView, step = -1, requireMessage = true),
-            source = "prev"
+            source = "prev",
+            hasTimeBeforeNext = shouldRefreshPreviousBoundary
         )
-        refreshVisibleNeighborItem(
-            adapter = adapter,
-            position = position + 1,
-            itemView = adjacentVisibleItem(itemView, step = 1, requireMessage = true),
-            source = "next"
-        )
+        if (shouldRefreshGroupNeighbors) {
+            refreshVisibleNeighborItem(
+                adapter = adapter,
+                position = position + 1,
+                itemView = adjacentVisibleItem(itemView, step = 1, requireMessage = true),
+                source = "next"
+            )
+        }
     }
 
     private fun refreshVisibleNeighborItem(
         adapter: Any,
         position: Int,
         itemView: View?,
-        source: String
+        source: String,
+        hasTimeBeforeNext: Boolean? = null
     ) {
         if (position < 0 || itemView == null) {
             return
         }
         val root = findItemRoot(itemView) ?: itemView
+        val resolvedPosition = ModernChatBubbleStyler.rememberedAdapterPosition(adapter, root)
+            ?: position
+        val nextHasVisibleTime = hasTimeBeforeNext
+            ?: adjacentVisibleItem(root, step = 1, requireMessage = true)
+                ?.let { ModernChatBubbleStyler.hasVisibleTimeSeparatorBefore(it) }
+            ?: false
         val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(
             adapter = adapter,
-            position = position,
-            hasTimeBeforeCurrent = hasVisibleTimeSeparator(root),
-            hasTimeBeforeNext = nextVisibleItem(root)?.let { hasVisibleTimeSeparator(it) } == true
+            position = resolvedPosition,
+            hasTimeBeforeCurrent = ModernChatBubbleStyler.hasVisibleTimeSeparatorBefore(root),
+            hasTimeBeforeNext = nextHasVisibleTime,
+            probeContext = root.context
         ) ?: return
-        applyState(root, state, "adapter-$source:${adapter.javaClass.simpleName}:$position")
-    }
-
-    private fun scheduleRightAppendRefresh(
-        boundView: View,
-        holder: Any?,
-        msgInfo: Any,
-        initialContext: ModernChatBubbleStyler.RenderContext
-    ) {
-        if (initialContext.adapter != null &&
-            initialContext.position >= 0 &&
-            initialContext.state.position != ChatBubbleStylePolicy.GroupPosition.SINGLE
-        ) {
-            return
-        }
-        val itemView = findItemRoot(boundView) ?: boundView
-        if (XposedHelpers.getAdditionalInstanceField(itemView, keyPendingAppendRefresh) == true) {
-            return
-        }
-        XposedHelpers.setAdditionalInstanceField(itemView, keyPendingAppendRefresh, true)
-        scheduleRightAppendRefreshAttempt(itemView, holder, msgInfo, attempt = 0)
-    }
-
-    private fun scheduleRightAppendRefreshAttempt(
-        itemView: View,
-        holder: Any?,
-        msgInfo: Any,
-        attempt: Int
-    ) {
-        val delay = appendRefreshDelaysMs.getOrNull(attempt)
-        if (delay == null) {
-            XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingAppendRefresh)
-            return
-        }
-        itemView.postDelayed({
-            val root = findItemRoot(itemView) ?: itemView
-            val context = ModernChatBubbleStyler.resolveRenderContextFromChattingItemBind(root, holder, msgInfo)
-            val shouldRetry = if (context != null && context.state.side == ChatBubbleStylePolicy.Side.RIGHT) {
-                val applied = applyState(root, context.state, "chatItem-delayed:${attempt + 1}")
-                if (applied && context.adapter != null && context.position >= 0) {
-                    refreshVisibleNeighborItemsIfNeeded(context.adapter, context.position, root, context.state)
-                }
-                context.adapter == null ||
-                        context.position < 0 ||
-                        context.state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE
-            } else {
-                true
-            }
-            if (shouldRetry && attempt + 1 < appendRefreshDelaysMs.size) {
-                scheduleRightAppendRefreshAttempt(root, holder, msgInfo, attempt + 1)
-            } else {
-                XposedHelpers.removeAdditionalInstanceField(root, keyPendingAppendRefresh)
-                if (root !== itemView) {
-                    XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingAppendRefresh)
-                }
-            }
-        }, delay)
-    }
-
-    private fun applyVisibleBoundaries(
-        itemView: View,
-        state: ChatBubbleStylePolicy.RenderState
-    ): ChatBubbleStylePolicy.RenderState {
-        val splitBefore = hasVisibleTimeSeparator(itemView)
-        val splitAfter = nextVisibleItem(itemView)?.let { hasVisibleTimeSeparator(it) } == true
-        if (!splitBefore && !splitAfter) {
-            return state
-        }
-        val hasPrevious = !splitBefore && when (state.position) {
-            ChatBubbleStylePolicy.GroupPosition.MIDDLE,
-            ChatBubbleStylePolicy.GroupPosition.BOTTOM -> true
-            ChatBubbleStylePolicy.GroupPosition.TOP,
-            ChatBubbleStylePolicy.GroupPosition.SINGLE -> false
-        }
-        val hasNext = !splitAfter && when (state.position) {
-            ChatBubbleStylePolicy.GroupPosition.TOP,
-            ChatBubbleStylePolicy.GroupPosition.MIDDLE -> true
-            ChatBubbleStylePolicy.GroupPosition.BOTTOM,
-            ChatBubbleStylePolicy.GroupPosition.SINGLE -> false
-        }
-        val position = ChatBubbleStylePolicy.groupPosition(hasPrevious = hasPrevious, hasNext = hasNext)
-        if (position == state.position) {
-            return state
-        }
-        return state.copy(
-            position = position,
-            showAvatar = ChatBubbleStylePolicy.showAvatar(position),
-            showNickname = ChatBubbleStylePolicy.showNickname(state.side, position),
-            topMarginDp = ChatBubbleStylePolicy.topMarginDp(position),
-            cornerRadii = ChatBubbleStylePolicy.cornerRadii(state.side, position)
-        )
-    }
-
-    private fun scheduleBoundaryRefresh(
-        itemView: View,
-        state: ChatBubbleStylePolicy.RenderState,
-        appliedState: ChatBubbleStylePolicy.RenderState,
-        source: String
-    ) {
-        if (state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE) {
-            return
-        }
-        val refreshSignature = "${state.stableKey}:${state.position}:${appliedState.position}"
-        if (XposedHelpers.getAdditionalInstanceField(itemView, keyBoundaryRefreshSignature) == refreshSignature) {
-            return
-        }
-        XposedHelpers.setAdditionalInstanceField(itemView, keyBoundaryRefreshSignature, refreshSignature)
-    }
-
-    private fun refreshPreviousItemAcrossTimeSeparator(adapter: Any, position: Int, itemView: View) {
-        if (!hasVisibleTimeSeparator(itemView) || position <= 0) {
-            return
-        }
-        val previousItem = previousVisibleMessageItem(itemView) ?: return
-        visibleBoundaryEndState(previousItem)?.let { previousState ->
-            applyState(previousItem, previousState, "visible-boundary:${adapter.javaClass.simpleName}:${position - 1}")
-            return
-        }
-        val previousState = ModernChatBubbleStyler.resolveRenderStateFromAdapter(
-            adapter = adapter,
-            position = position - 1,
-            hasTimeBeforeCurrent = hasVisibleTimeSeparator(previousItem),
-            hasTimeBeforeNext = true
-        ) ?: return
-        applyState(previousItem, previousState, "adapter-neighbor:${adapter.javaClass.simpleName}:${position - 1}")
-    }
-
-    private fun visibleBoundaryEndState(itemView: View): ChatBubbleStylePolicy.RenderState? {
-        val target = findBubbleTarget(itemView) ?: return null
-        val bubble = target.bubbleView.background as? ModernBubbleDrawable ?: return null
-        val position = ChatBubbleStylePolicy.positionWithoutNext(bubble.position)
-        if (position == bubble.position) {
-            return null
-        }
-        return renderState(
-            stableKey = bubble.stableKey,
-            side = bubble.side,
-            position = position
-        )
-    }
-
-    private fun renderState(
-        stableKey: String,
-        side: ChatBubbleStylePolicy.Side,
-        position: ChatBubbleStylePolicy.GroupPosition
-    ): ChatBubbleStylePolicy.RenderState {
-        return ChatBubbleStylePolicy.RenderState(
-            stableKey = stableKey,
-            side = side,
-            position = position,
-            showAvatar = ChatBubbleStylePolicy.showAvatar(position),
-            showNickname = ChatBubbleStylePolicy.showNickname(side, position),
-            topMarginDp = ChatBubbleStylePolicy.topMarginDp(position),
-            cornerRadii = ChatBubbleStylePolicy.cornerRadii(side, position)
-        )
+        applyState(root, state, "adapter-$source:${adapter.javaClass.simpleName}:$resolvedPosition")
     }
 
     private fun clearOriginalBubbleContainers(messageView: View) {
@@ -663,7 +517,7 @@ object ModernChatBubbleRenderer {
     }
 
     private fun tuneMediaContent(target: BubbleTarget) {
-        if (target.kind != "video") {
+        if (target.kind != "image" && target.kind != "video") {
             return
         }
         val imageView = findViewByResourceName(target.bubbleView, "bkm") as? ImageView ?: return
@@ -672,8 +526,10 @@ object ModernChatBubbleRenderer {
         }
         imageView.adjustViewBounds = false
         clearViewLayer(imageView)
-        listOf("bqy", "boy").forEach { name ->
-            findViewByResourceName(target.bubbleView, name)?.bringToFront()
+        if (target.kind == "video") {
+            listOf("bqy", "boy").forEach { name ->
+                findViewByResourceName(target.bubbleView, name)?.bringToFront()
+            }
         }
     }
 
@@ -681,6 +537,7 @@ object ModernChatBubbleRenderer {
         return kind == "mini-program" ||
                 kind == "contact-card" ||
                 kind == "position" ||
+                kind == "web-share" ||
                 kind == "rich-card" ||
                 kind == "transfer" ||
                 kind == "transfer-received" ||
@@ -692,6 +549,7 @@ object ModernChatBubbleRenderer {
             "mini-program" -> tuneMiniProgramCard(target.bubbleView)
             "contact-card" -> tuneContactCard(target.bubbleView)
             "position" -> tunePositionCard(target.bubbleView)
+            "web-share" -> tuneWebShareCard(target.bubbleView)
             "rich-card" -> tuneGenericCard(target.bubbleView)
             "transfer" -> tunePaymentCard(target.bubbleView, dividerColor = 0x33FFFFFF, received = false)
             "transfer-received" -> tunePaymentCard(target.bubbleView, dividerColor = 0x33E0852A, received = true)
@@ -701,9 +559,10 @@ object ModernChatBubbleRenderer {
 
     private fun tuneMiniProgramCard(card: View) {
         val needsMeasuredTune = card.width <= dp(card, 34f) || card.height <= dp(card, 34f)
-        setTextColorByName(card, "biu", 0xFF4F5850.toInt())
+        setTextColorByName(card, "biu", 0xFF667069.toInt())
         setTextColorByName(card, "biq", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
         setTextColorByName(card, "bit", 0xFF8F968E.toInt())
+        tuneMiniProgramHeader(card)
         tuneMiniProgramTitle(card)
         setMiniProgramPreviewStyle(card)
         tuneMiniProgramFooter(card)
@@ -723,6 +582,34 @@ object ModernChatBubbleRenderer {
             if (card.width > dp(card, 34f) && card.visibility == View.VISIBLE) {
                 tuneMiniProgramCard(card)
             }
+        }
+    }
+
+    private fun tuneMiniProgramHeader(card: View) {
+        val icon = findViewByResourceName(card, "bis") as? ImageView ?: return
+        val headerRow = icon.parent as? ViewGroup ?: return
+        headerRow.minimumHeight = 0
+        headerRow.setPadding(0, 0, 0, 0)
+        if (headerRow is LinearLayout) {
+            headerRow.gravity = (headerRow.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+        }
+        setInsetWidthAndMargins(
+            view = headerRow,
+            contentWidth = card.width,
+            left = dp(card, 17f),
+            right = dp(card, 17f)
+        )
+        setExactSize(icon, dp(card, 16f), dp(card, 16f))
+        setLeftMargin(icon, 0)
+        (findViewByResourceName(headerRow, "biu") as? TextView)?.let { appName ->
+            appName.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12f)
+            appName.includeFontPadding = false
+            appName.gravity = (appName.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+            setLeftMargin(appName, dp(card, 6f))
+        }
+        findViewByResourceName(headerRow, "bhq")?.let { assurance ->
+            assurance.alpha = 0.92f
+            setLeftMargin(assurance, dp(card, 6f))
         }
     }
 
@@ -784,7 +671,7 @@ object ModernChatBubbleRenderer {
     private fun tuneMiniProgramFooter(card: View) {
         val footer = findViewByResourceName(card, "bir") as? ViewGroup ?: return
         footer.minimumHeight = 0
-        setTopMargin(footer, dp(card, 10f))
+        setTopMargin(footer, dp(card, 17f))
         if (footer.childCount > 0) {
             tuneFixedCardDividerView(
                 view = footer.getChildAt(0),
@@ -796,14 +683,58 @@ object ModernChatBubbleRenderer {
         }
         if (footer.childCount > 1) {
             val footerRow = footer.getChildAt(1)
-            setTopMargin(footerRow, dp(card, 8f))
+            setTopMargin(footerRow, dp(card, 10f))
             setInsetWidthAndMargins(
                 view = footerRow,
                 contentWidth = card.width,
-                left = dp(card, 9f),
+                left = dp(card, 17f),
                 right = dp(card, 17f)
             )
+            tuneMiniProgramFooterSourceRow(card, footerRow)
         }
+    }
+
+    private fun tuneMiniProgramFooterSourceRow(card: View, footerRow: View) {
+        footerRow.minimumHeight = 0
+        footerRow.setPadding(0, 0, 0, 0)
+        if (footerRow is LinearLayout) {
+            footerRow.gravity = (footerRow.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+        }
+        val footerText = findViewByResourceName(footerRow, "bit") as? TextView ?: return
+        tuneMiniProgramFooterTextAlignment(footerText)
+        val sourceRow = footerText.parent as? ViewGroup ?: footerRow as? ViewGroup ?: return
+        if (sourceRow !== footerRow) {
+            sourceRow.minimumHeight = 0
+            sourceRow.setPadding(0, 0, 0, 0)
+            if (sourceRow is LinearLayout) {
+                sourceRow.gravity = (sourceRow.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+            }
+        }
+        findMiniProgramFooterSourceIcon(sourceRow, footerText)?.let { icon ->
+            setExactSize(icon, dp(card, 12f), dp(card, 12f))
+            setLeftMargin(icon, 0)
+        }
+        setLeftMargin(footerText, dp(card, 4f))
+    }
+
+    private fun tuneMiniProgramFooterTextAlignment(textView: TextView) {
+        textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11f)
+        textView.includeFontPadding = true
+        textView.gravity = (textView.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+        textView.setPadding(0, 0, 0, 0)
+        textView.setMinLines(0)
+        textView.setMinHeight(0)
+        textView.minimumHeight = 0
+    }
+
+    private fun findMiniProgramFooterSourceIcon(sourceRow: ViewGroup, footerText: View): View? {
+        for (index in 0 until sourceRow.childCount) {
+            val child = sourceRow.getChildAt(index)
+            if (child !== footerText && child is ImageView && child.visibility != View.GONE) {
+                return child
+            }
+        }
+        return null
     }
 
     private fun normalizeMiniProgramCardHeight(card: View) {
@@ -981,45 +912,183 @@ object ModernChatBubbleRenderer {
     }
 
     private fun tuneWebShareCard(card: View) {
+        val signals = findWebShareCardSignals(card) ?: return
         val needsMeasuredTune = card.width <= dp(card, 34f) ||
-                (findViewByResourceName(card, "biy")?.height ?: 0) <= dp(card, 34f)
-        setTextColorByName(card, "bjx", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
-        setTextColorByName(card, "bju", ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR)
-        setTextColorByName(card, "bj2", 0xFF4F5850.toInt())
-        setTextColorByName(card, "bjp", 0xFF8F968E.toInt())
-        listOf("bjl", "bjp").forEach { name ->
-            findViewByResourceName(card, name)?.let { clearViewLayer(it) }
-        }
-        setWebSharePreviewStyle(card)
-        normalizeWebShareCardHeight(card)
+                signals.content.height <= dp(card, 34f)
+        tuneWebShareContentInsets(card, signals)
+        tuneWebShareText(signals)
+        signals.footer?.let { clearViewLayer(it) }
+        signals.footerText?.let { clearViewLayer(it) }
+        hideWebShareContentDividers(signals)
+        setWebSharePreviewStyle(card, signals)
+        tuneWebShareFooter(card, signals)
+        normalizeWebShareCardHeight(card, signals)
         if (needsMeasuredTune) {
             scheduleWebShareMeasuredTune(card)
         }
     }
 
-    private fun setWebSharePreviewStyle(card: View) {
-        val imageView = findViewByResourceName(card, "bjs") as? ImageView ?: return
-        val panel = findViewByResourceName(card, "bjr") ?: (imageView.parent as? View) ?: imageView
-        panel.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(0xFFF7F8F7.toInt())
-            setStroke(dp(card, 0.75f), 0x0F000000)
-            cornerRadius = dp(card, 12f).toFloat()
+    private fun tuneWebShareContentInsets(card: View, signals: WebShareCardSignals) {
+        val horizontalInset = dp(card, webShareContentHorizontalInsetDp)
+        val verticalInset = dp(card, webShareContentVerticalInsetDp)
+        val content = signals.content
+        if (content.paddingLeft != horizontalInset ||
+            content.paddingTop != verticalInset ||
+            content.paddingRight != horizontalInset ||
+            content.paddingBottom != verticalInset
+        ) {
+            content.setPadding(horizontalInset, verticalInset, horizontalInset, verticalInset)
         }
-        panel.minimumHeight = 0
-        clipRounded(panel, radiusDp = 12f)
     }
 
-    private fun normalizeWebShareCardHeight(card: View) {
-        val content = findViewByResourceName(card, "biy") ?: return
-        val desiredHeight = content.bottom + dp(card, 1f)
+    private fun tuneWebShareText(signals: WebShareCardSignals) {
+        signals.titleViews.forEach { title ->
+            tuneWebShareTextView(
+                view = title,
+                color = ChatBubbleStylePolicy.DEFAULT_LEFT_TEXT_COLOR,
+                maxLines = 2
+            )
+        }
+        signals.descriptionView?.let { description ->
+            tuneWebShareTextView(
+                view = description,
+                color = 0xFF667069.toInt(),
+                maxLines = 2
+            )
+        }
+        signals.footerText?.let { footer ->
+            tuneWebShareTextView(
+                view = footer,
+                color = 0xFF8F968E.toInt(),
+                maxLines = 1
+            )
+        }
+    }
+
+    private fun tuneWebShareTextView(view: View, color: Int, maxLines: Int) {
+        setTextColor(view, color, color)
+        val textView = view as? TextView ?: return
+        if (textView.maxLines != maxLines) {
+            textView.maxLines = maxLines
+        }
+        if (textView.ellipsize != TextUtils.TruncateAt.END) {
+            textView.ellipsize = TextUtils.TruncateAt.END
+        }
+        textView.setMinLines(0)
+        textView.setMinHeight(0)
+        textView.minimumHeight = 0
+    }
+
+    private fun setWebSharePreviewStyle(card: View, signals: WebShareCardSignals) {
+        val imageView = signals.previewImage ?: return
+        val panel = signals.previewPanel ?: imageView
+        val previewSize = dp(card, webSharePreviewSizeDp)
+        setExactSize(panel, previewSize, previewSize)
+        setLeftMargin(panel, dp(card, 12f))
+        if (panel !== imageView) {
+            setExactSize(imageView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        } else {
+            setExactSize(imageView, previewSize, previewSize)
+        }
+        panel.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(0xFFF5F5F5.toInt())
+            setStroke(dp(card, 0.75f), 0x14000000)
+            cornerRadius = dp(card, webSharePreviewRadiusDp).toFloat()
+        }
+        panel.setPadding(0, 0, 0, 0)
+        panel.minimumHeight = 0
+        if (imageView.scaleType != ImageView.ScaleType.CENTER_CROP) {
+            imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        clipRounded(panel, radiusDp = webSharePreviewRadiusDp)
+    }
+
+    private fun hideWebShareContentDividers(signals: WebShareCardSignals) {
+        val content = signals.content
+        val footer = signals.footer
+        fun visit(view: View, depth: Int) {
+            if (depth > 8 || view.visibility != View.VISIBLE) {
+                return
+            }
+            if (footer != null && view !== content && (view === footer || containsView(footer, view))) {
+                return
+            }
+            if (view !== content && isLikelyCardDivider(content, view, inset = 0)) {
+                clearViewLayer(view)
+                view.alpha = 0f
+                return
+            }
+            val group = view as? ViewGroup ?: return
+            for (index in 0 until group.childCount) {
+                visit(group.getChildAt(index), depth + 1)
+            }
+        }
+        visit(content, 0)
+    }
+
+    private fun tuneWebShareFooter(card: View, signals: WebShareCardSignals) {
+        val footer = signals.footer as? ViewGroup ?: return
+        footer.minimumHeight = 0
+        setTopMargin(footer, dp(card, 8f))
+        signals.sourceIcon?.let { icon ->
+            setExactSize(icon, dp(card, 14f), dp(card, 14f))
+        }
+        signals.footerText?.let { footerText ->
+            tuneWebShareFooterTextAlignment(footerText)
+            setLeftMargin(footerText, dp(card, 3f))
+        }
+        tuneWebShareFooterSourceRow(card, signals)
+        findWideThinImageView(footer)?.let { divider ->
+            val dividerParentWidth = (divider.parent as? View)?.width?.takeIf { it > 0 }
+                ?: footer.width
+            tuneFixedCardDividerView(
+                view = divider,
+                contentWidth = dividerParentWidth,
+                horizontalInset = 0,
+                dividerColor = 0x0F000000,
+                dividerHeight = dp(card, 1f)
+            )
+        }
+    }
+
+    private fun tuneWebShareFooterTextAlignment(view: View) {
+        val textView = view as? TextView ?: return
+        textView.includeFontPadding = false
+        textView.gravity = (textView.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+        textView.setPadding(0, 0, 0, 0)
+    }
+
+    private fun tuneWebShareFooterSourceRow(card: View, signals: WebShareCardSignals) {
+        val iconParent = signals.sourceIcon?.parent as? View
+        val textParent = signals.footerText?.parent as? View
+        if (iconParent == null || iconParent !== textParent) {
+            return
+        }
+        iconParent.minimumHeight = 0
+        iconParent.setPadding(0, 0, 0, 0)
+        setTopMargin(iconParent, dp(card, 8f))
+        if (iconParent is LinearLayout) {
+            iconParent.gravity = (iconParent.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) or Gravity.CENTER_VERTICAL
+        }
+    }
+
+    private fun normalizeWebShareCardHeight(card: View, signals: WebShareCardSignals) {
+        if (card.width <= dp(card, 34f)) {
+            return
+        }
+        val contentBottom = maxOf(
+            signals.content.bottom.takeIf { it > 0 } ?: 0,
+            deepestVisibleChildBottom(card)
+        )
+        val desiredHeight = contentBottom + dp(card, 1f)
         if (desiredHeight <= dp(card, 34f)) {
             return
         }
         if (card.minimumHeight != 0) {
             card.minimumHeight = 0
         }
-        setExactHeight(card, desiredHeight)
+        setLayoutHeight(card, desiredHeight)
     }
 
     private fun scheduleWebShareMeasuredTune(card: View) {
@@ -1029,7 +1098,12 @@ object ModernChatBubbleRenderer {
         XposedHelpers.setAdditionalInstanceField(card, keyPendingWebShareMeasuredTune, true)
         card.post {
             XposedHelpers.removeAdditionalInstanceField(card, keyPendingWebShareMeasuredTune)
-            if (card.visibility == View.VISIBLE) {
+            val signals = if (card.visibility == View.VISIBLE && card.width > dp(card, 34f)) {
+                findWebShareCardSignals(card)
+            } else {
+                null
+            }
+            if (signals != null && signals.content.height > dp(card, 34f)) {
                 tuneWebShareCard(card)
             }
         }
@@ -1615,12 +1689,20 @@ object ModernChatBubbleRenderer {
         target: BubbleTarget,
         state: ChatBubbleStylePolicy.RenderState
     ) {
+        syncRowChromeState(itemView, target, state)
+    }
+
+    private fun syncRowChromeState(
+        itemView: View,
+        target: BubbleTarget?,
+        state: ChatBubbleStylePolicy.RenderState
+    ) {
         val avatarView = findViewByResourceName(itemView, resourceAvatar)
         setAvatarVisibility(avatarView, state.showAvatar)
         setNicknameVisibility(findNicknameView(itemView), state.showNickname)
         resetAvatarPlacement(avatarView)
-        if (target.kind != "text" && state.showAvatar) {
-            alignVisibleAvatarToBubbleBottom(itemView, target.layoutView, state, schedule = true)
+        if (target != null && target.kind != "text" && state.showAvatar) {
+            alignVisibleAvatarToBubbleBottom(itemView, target.layoutView, state)
         }
     }
 
@@ -1954,12 +2036,11 @@ object ModernChatBubbleRenderer {
 
         private fun classifyKind(fallback: String, text: String, target: View): String {
             val hasMiniProgramFooter = hasMiniProgramFooterSignal(target)
-            val hasWebShareSignals = findViewByResourceName(target, "biy") != null &&
-                    hasAnyResourceName(target, "bjx", "bju", "bjr", "bjs", "bjl", "bjp")
+            val hasWebShareSignals = hasWebShareCardSignals(target)
             if (fallback == "mini-program") {
                 return when {
                     hasMiniProgramFooter -> "mini-program"
-                    hasWebShareSignals -> "rich-card"
+                    hasWebShareSignals -> "web-share"
                     else -> "mini-program"
                 }
             }
@@ -1973,7 +2054,7 @@ object ModernChatBubbleRenderer {
                 ChatBubbleStylePolicy.hasRedpacketCardTextSignal(text) -> "redpacket"
                 hasMiniProgramFooter -> "mini-program"
                 text.contains("个人名片") || text.contains("名片") -> "contact-card"
-                hasWebShareSignals -> "rich-card"
+                hasWebShareSignals -> "web-share"
                 else -> fallback
             }
         }
@@ -1997,13 +2078,7 @@ object ModernChatBubbleRenderer {
                         findViewByResourceName(target, "gbh") != null)
         val hasTransferTextSignal = hasTransferTextSignal(sample)
         val hasMiniProgramFooter = hasMiniProgramFooterSignal(target)
-        val hasWebShareSignals = hasAnyResourceName(
-            target,
-            "bju",
-            "bj2",
-            "bjr",
-            "bjs"
-        )
+        val hasWebShareSignals = hasWebShareCardSignals(target)
         if (!hasTransferOrGenericCardSignals &&
             !hasModernTransferSignals &&
             !hasTransferTextSignal &&
@@ -2047,7 +2122,7 @@ object ModernChatBubbleRenderer {
             hasMiniProgramFooter -> "mini-program"
             ChatBubbleStylePolicy.hasRedpacketCardTextSignal(text) -> "redpacket"
             text.contains("个人名片") || text.contains("名片") -> "contact-card"
-            hasWebShareSignals -> "rich-card"
+            hasWebShareSignals -> "web-share"
             else -> "rich-card"
         }
     }
@@ -2081,11 +2156,11 @@ object ModernChatBubbleRenderer {
 
     private fun findImageBubbleTargetByStructure(itemView: View): BubbleTarget? {
         if (findViewByResourceName(itemView, resourceMessage) != null ||
-            findViewByResourceName(itemView, resourceCallBubble) != null ||
             findViewByResourceName(itemView, resourceVoiceBubble) != null
         ) {
             return null
         }
+        findExplicitImageBubbleTarget(itemView)?.let { return it }
         val candidates = mutableListOf<ImageBubbleCandidate>()
         collectImageBubbleCandidates(itemView, itemView, candidates, depth = 0)
         val candidate = candidates.maxByOrNull { it.score } ?: return null
@@ -2097,6 +2172,34 @@ object ModernChatBubbleRenderer {
             applyTextPadding = false,
             layoutView = target,
             signatureText = "image:${target.width}x${target.height}",
+            clipToOutline = true
+        )
+    }
+
+    private fun findExplicitImageBubbleTarget(itemView: View): BubbleTarget? {
+        val mediaBubble = findViewByResourceName(itemView, resourceCallBubble) ?: return null
+        val imageView = findViewByResourceName(mediaBubble, "bkm") as? ImageView ?: return null
+        val durationText = renderedText(findViewByResourceName(mediaBubble, "boy"))
+        val hasVideoChrome = !durationText.isNullOrBlank() ||
+                findViewByResourceName(mediaBubble, "bqy") != null
+        if (hasVideoChrome) {
+            return null
+        }
+        findViewByResourceName(itemView, resourceAvatar)?.let { avatar ->
+            if (imageView === avatar || containsView(imageView, avatar) || containsView(avatar, imageView)) {
+                return null
+            }
+        }
+        return BubbleTarget(
+            bubbleView = mediaBubble,
+            textView = null,
+            kind = "image",
+            applyTextPadding = false,
+            layoutView = mediaBubble,
+            signatureText = imageView.contentDescription
+                ?.toString()
+                ?.takeIf { it.isNotBlank() }
+                ?: "image:bkm",
             clipToOutline = true
         )
     }
@@ -2433,12 +2536,78 @@ object ModernChatBubbleRenderer {
             .takeIf { it.isNotBlank() }
     }
 
-    private fun hasMiniProgramFooterSignal(root: View): Boolean {
-        val footer = findViewByResourceName(root, "bit") ?: return false
-        if (!isVisibleDescendant(root, footer)) {
-            return false
+    private fun hasWebShareCardSignals(root: View): Boolean {
+        return findWebShareCardSignals(root) != null
+    }
+
+    private fun findWebShareCardSignals(root: View): WebShareCardSignals? {
+        if (hasMiniProgramCardSignal(root)) {
+            return null
         }
+        val content = findVisibleViewByResourceName(root, "biy") ?: return null
+        val titleViews = listOfNotNull(
+            findVisibleViewByResourceName(root, "bjx", content),
+            findVisibleViewByResourceName(root, "bju", content)
+        )
+        val description = findVisibleViewByResourceName(root, "bj2", content)
+        val previewImage = findVisibleViewByResourceName(root, "bjs", content) as? ImageView
+        val previewPanel = findVisibleViewByResourceName(root, "bjr", content)
+            ?.takeIf { previewImage == null || containsView(it, previewImage) }
+            ?: (previewImage?.parent as? View)?.takeIf { containsView(content, it) }
+        val footer = findVisibleViewByResourceName(root, "bjl", content)
+        val footerText = footer?.let { findVisibleViewByResourceName(root, "bjp", it) }
+        val sourceIcon = footer?.let { findVisibleViewByResourceName(root, "bjm", it) }
+        val hasHeaderText = titleViews.any { hasReadableText(it) } || hasReadableText(description)
+        val hasPreview = previewPanel != null || previewImage != null
+        val hasFooter = footer != null && footerText != null
+        if (!hasHeaderText || (!hasPreview && !hasFooter)) {
+            return null
+        }
+        return WebShareCardSignals(
+            content = content,
+            titleViews = titleViews,
+            descriptionView = description,
+            previewPanel = previewPanel,
+            previewImage = previewImage,
+            footer = footer,
+            footerText = footerText,
+            sourceIcon = sourceIcon
+        )
+    }
+
+    private fun hasMiniProgramCardSignal(root: View): Boolean {
+        return hasMiniProgramFooterSignal(root) ||
+                findVisibleViewByResourceName(root, "biq") != null ||
+                findVisibleViewByResourceName(root, "big") != null ||
+                findVisibleViewByResourceName(root, "bir") != null ||
+                findVisibleViewByResourceName(root, "bit") != null
+    }
+
+    private fun hasMiniProgramFooterSignal(root: View): Boolean {
+        val footer = findVisibleViewByResourceName(root, "bit") ?: return false
         return renderedText(footer)?.trim() == "小程序"
+    }
+
+    private fun findVisibleViewByResourceName(root: View, name: String, within: View? = null): View? {
+        val id = resourceId(root, name)
+        if (id == 0) {
+            return null
+        }
+        return findVisibleViewById(current = root, id = id, within = within, visibilityRoot = root)
+    }
+
+    private fun findVisibleViewById(current: View, id: Int, within: View?, visibilityRoot: View): View? {
+        if (current.id == id &&
+            isVisibleDescendant(visibilityRoot, current) &&
+            (within == null || containsView(within, current))
+        ) {
+            return current
+        }
+        val group = current as? ViewGroup ?: return null
+        for (index in 0 until group.childCount) {
+            findVisibleViewById(group.getChildAt(index), id, within, visibilityRoot)?.let { return it }
+        }
+        return null
     }
 
     private fun hasAnyResourceName(root: View, vararg names: String): Boolean {
@@ -2484,6 +2653,160 @@ object ModernChatBubbleRenderer {
         RuntimeProbe.append(view.context, probeFile, "ModernNativeBubble $message")
     }
 
+    private fun probeMediaTargetIfNeeded(
+        itemView: View,
+        target: BubbleTarget,
+        state: ChatBubbleStylePolicy.RenderState,
+        source: String,
+        text: String
+    ) {
+        if (!enableMediaBubbleProbe || target.kind !in setOf("image", "video")) {
+            return
+        }
+        val treeMatch = when {
+            ViewTreeUtils.equals(VTTV.ChatLeftPictureItem.item, itemView) -> "left-picture"
+            ViewTreeUtils.equals(VTTV.ChatRightPictureItem.item, itemView) -> "right-picture"
+            else -> "unknown"
+        }
+        val images = collectDescendantImages(target.bubbleView)
+        val key = listOf(
+            treeMatch,
+            state.side.name,
+            state.position.name,
+            target.kind,
+            boundsKey(target.bubbleView),
+            images.joinToString("|") { boundsKey(it) },
+            text.hashCode().toString()
+        ).joinToString(":")
+        if (mediaProbeKeys.size >= 160 || !mediaProbeKeys.add(key)) {
+            return
+        }
+        val imageSummary = images
+            .take(6)
+            .joinToString(" || ") { describeImageForProbe(it) }
+            .ifBlank { "none" }
+        val message = buildString {
+            append("MediaBubble target ")
+            append("source=").append(source)
+            append(" tree=").append(treeMatch)
+            append(" side=").append(state.side)
+            append(" group=").append(state.position)
+            append(" kind=").append(target.kind)
+            append(" target=").append(describeViewForProbe(target.bubbleView))
+            append(" layout=").append(describeViewForProbe(target.layoutView))
+            append(" parents=").append(parentChainForProbe(target.bubbleView, maxDepth = 5))
+            append(" children=").append(directChildrenForProbe(target.bubbleView))
+            append(" images=").append(imageSummary)
+        }
+        RuntimeProbe.append(itemView.context, mediaProbeFile, message)
+    }
+
+    private fun probeNoBubbleMediaCandidateIfNeeded(
+        itemView: View,
+        state: ChatBubbleStylePolicy.RenderState,
+        source: String
+    ) {
+        if (!enableMediaBubbleProbe) {
+            return
+        }
+        val images = collectDescendantImages(itemView)
+        if (images.isEmpty()) {
+            return
+        }
+        val interestingImages = images.filter { image ->
+            val name = resourceName(image)
+            name in setOf("bkm", "bko") || isLikelyChatImage(itemView, image)
+        }
+        if (interestingImages.isEmpty()) {
+            return
+        }
+        val key = listOf(
+            "no-target",
+            state.side.name,
+            state.position.name,
+            boundsKey(itemView),
+            interestingImages.joinToString("|") { "${resourceName(it)}:${boundsKey(it)}" }
+        ).joinToString(":")
+        if (mediaProbeKeys.size >= 160 || !mediaProbeKeys.add(key)) {
+            return
+        }
+        val imageSummary = interestingImages
+            .take(8)
+            .joinToString(" || ") { describeImageForProbe(it) }
+        val message = buildString {
+            append("MediaBubble noTarget ")
+            append("source=").append(source)
+            append(" side=").append(state.side)
+            append(" group=").append(state.position)
+            append(" item=").append(describeViewForProbe(itemView))
+            append(" children=").append(directChildrenForProbe(itemView))
+            append(" images=").append(imageSummary)
+        }
+        RuntimeProbe.append(itemView.context, mediaProbeFile, message)
+    }
+
+    private fun collectDescendantImages(root: View): List<ImageView> {
+        val result = mutableListOf<ImageView>()
+        fun visit(view: View, depth: Int) {
+            if (depth > 8 || view.visibility != View.VISIBLE || result.size >= 8) {
+                return
+            }
+            if (view is ImageView) {
+                result += view
+            }
+            val group = view as? ViewGroup ?: return
+            for (index in 0 until group.childCount) {
+                visit(group.getChildAt(index), depth + 1)
+            }
+        }
+        visit(root, 0)
+        return result
+    }
+
+    private fun describeImageForProbe(image: ImageView): String {
+        return describeViewForProbe(image) +
+                "{scale=${image.scaleType},adjust=${image.adjustViewBounds},drawable=${image.drawable?.javaClass?.simpleName}}"
+    }
+
+    private fun parentChainForProbe(view: View, maxDepth: Int): String {
+        val parts = mutableListOf<String>()
+        var current: View? = view
+        var depth = 0
+        while (current != null && depth < maxDepth) {
+            parts += describeViewForProbe(current)
+            current = current.parent as? View
+            depth++
+        }
+        return parts.joinToString(" <- ")
+    }
+
+    private fun directChildrenForProbe(view: View): String {
+        val group = view as? ViewGroup ?: return "none"
+        val parts = mutableListOf<String>()
+        for (index in 0 until group.childCount.coerceAtMost(8)) {
+            parts += "$index:${describeViewForProbe(group.getChildAt(index))}"
+        }
+        return parts.joinToString(" | ").ifBlank { "none" }
+    }
+
+    private fun describeViewForProbe(view: View): String {
+        val group = view as? ViewGroup
+        return "${view.javaClass.name.substringAfterLast('.')}" +
+                "#${resourceName(view).orEmpty()}" +
+                "[${view.left},${view.top},${view.right},${view.bottom}]" +
+                " size=${view.width}x${view.height}" +
+                " pad=${view.paddingLeft},${view.paddingTop},${view.paddingRight},${view.paddingBottom}" +
+                " bg=${view.background?.javaClass?.simpleName}" +
+                " clip=${view.clipToOutline}" +
+                " cc=${group?.clipChildren}" +
+                " cp=${group?.clipToPadding}" +
+                " child=${group?.childCount ?: 0}"
+    }
+
+    private fun boundsKey(view: View): String {
+        return "${view.left},${view.top},${view.right},${view.bottom}:${view.width}x${view.height}"
+    }
+
     private fun debug(view: View, message: String) {
         ModernChatBubbleStyler.debugBubbleProbe(view.context, "renderer $message")
     }
@@ -2506,6 +2829,31 @@ object ModernChatBubbleRenderer {
                     "avatarContainer=${visibilityName(avatarContainer)} avatarH=${avatarContainer?.height}/${avatarView?.height} " +
                     "wantNick=${state.showNickname} nick=${visibilityName(nicknameView)} " +
                     "item=${boundsText(itemView)} msg=${boundsText(messageView)} text=${shortText(text)}"
+        )
+    }
+
+    private fun probeAvatarApplyState(
+        itemView: View,
+        target: BubbleTarget?,
+        state: ChatBubbleStylePolicy.RenderState,
+        source: String,
+        text: String?
+    ) {
+        if (!ModernChatBubbleStyler.isAvatarGroupingProbeEnabled()) {
+            return
+        }
+        val avatarView = findViewByResourceName(itemView, resourceAvatar)
+        ModernChatBubbleStyler.probeAvatarApply(
+            context = itemView.context,
+            source = source,
+            state = state,
+            targetKind = target?.kind,
+            hasTimeBefore = ModernChatBubbleStyler.hasVisibleTimeSeparatorBefore(itemView),
+            hasAvatarView = avatarView != null,
+            avatarVisibility = visibilityName(avatarView),
+            nicknameText = renderedText(findNicknameView(itemView)),
+            text = text,
+            itemBounds = boundsText(itemView)
         )
     }
 
@@ -2597,14 +2945,6 @@ object ModernChatBubbleRenderer {
         return false
     }
 
-    private fun previousVisibleMessageItem(itemView: View): View? {
-        return adjacentVisibleItem(itemView, step = -1, requireMessage = true)
-    }
-
-    private fun nextVisibleItem(itemView: View): View? {
-        return adjacentVisibleItem(itemView, step = 1, requireMessage = false)
-    }
-
     private fun adjacentVisibleItem(itemView: View, step: Int, requireMessage: Boolean): View? {
         val parent = findRecyclerParent(itemView) ?: itemView.parent as? ViewGroup ?: return null
         val currentTop = screenTop(itemView)
@@ -2675,11 +3015,6 @@ object ModernChatBubbleRenderer {
         return clippedThroughTop || compactAtTopEdge
     }
 
-    private fun hasVisibleTimeSeparator(itemView: View): Boolean {
-        val view = findViewByResourceName(itemView, resourceNickname) ?: return false
-        return isTimeSeparatorView(view)
-    }
-
     private fun isTimeSeparatorView(view: View): Boolean {
         if (view.visibility != View.VISIBLE) {
             return false
@@ -2739,6 +3074,74 @@ object ModernChatBubbleRenderer {
         syncAvatarAndNicknameState(itemView, target, state)
     }
 
+    private fun scheduleRowChromeSyncIfNeeded(
+        itemView: View,
+        target: BubbleTarget,
+        state: ChatBubbleStylePolicy.RenderState,
+        source: String
+    ) {
+        if (target.kind == "text" || (!state.showAvatar && !state.showNickname)) {
+            return
+        }
+        val currentBubble = target.bubbleView.background as? ModernBubbleDrawable ?: return
+        if (currentBubble.stableKey != state.stableKey) {
+            return
+        }
+        val pendingKey = XposedHelpers.getAdditionalInstanceField(itemView, keyPendingRowChromeSync) as? String
+        if (pendingKey == state.stableKey) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(itemView, keyPendingRowChromeSync, state.stableKey)
+        rowChromeSyncDelaysMs.forEachIndexed { index, delayMs ->
+            itemView.postDelayed({
+                val delayedBubble = target.bubbleView.background as? ModernBubbleDrawable
+                if (delayedBubble?.stableKey == state.stableKey) {
+                    val delayedState = stateForCurrentBubble(state, delayedBubble)
+                    syncReusableState(itemView, target, delayedState)
+                    probeAvatarApplyState(
+                        itemView = itemView,
+                        target = target,
+                        state = delayedState,
+                        source = "$source.rowChrome$index",
+                        text = null
+                    )
+                } else {
+                    probeAvatarApplyState(
+                        itemView = itemView,
+                        target = null,
+                        state = state,
+                        source = "$source.rowChrome$index.miss",
+                        text = null
+                    )
+                }
+                if (index == rowChromeSyncDelaysMs.lastIndex &&
+                    XposedHelpers.getAdditionalInstanceField(itemView, keyPendingRowChromeSync) == state.stableKey
+                ) {
+                    XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingRowChromeSync)
+                }
+            }, delayMs)
+        }
+    }
+
+    private fun stateForCurrentBubble(
+        state: ChatBubbleStylePolicy.RenderState,
+        drawable: ModernBubbleDrawable
+    ): ChatBubbleStylePolicy.RenderState {
+        if (drawable.side == state.side && drawable.position == state.position) {
+            return state
+        }
+        val side = drawable.side
+        val position = drawable.position
+        return state.copy(
+            side = side,
+            position = position,
+            showAvatar = ChatBubbleStylePolicy.showAvatar(position),
+            showNickname = ChatBubbleStylePolicy.showNickname(side, position),
+            topMarginDp = ChatBubbleStylePolicy.topMarginDp(position),
+            cornerRadii = ChatBubbleStylePolicy.cornerRadii(side, position)
+        )
+    }
+
     private fun syncMessageParentTopMargin(
         itemView: View,
         messageView: View,
@@ -2788,8 +3191,7 @@ object ModernChatBubbleRenderer {
     private fun alignVisibleAvatarToBubbleBottom(
         itemView: View,
         bubbleView: View,
-        state: ChatBubbleStylePolicy.RenderState,
-        schedule: Boolean
+        state: ChatBubbleStylePolicy.RenderState
     ) {
         if (!state.showAvatar) {
             return
@@ -2892,6 +3294,7 @@ object ModernChatBubbleRenderer {
             "contact-card",
             "position",
             "mini-program",
+            "web-share",
             "rich-card" -> ChatBubbleStylePolicy.cardPalette()
             "image",
             "video" -> ChatBubbleStylePolicy.imagePalette()
