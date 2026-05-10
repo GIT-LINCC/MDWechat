@@ -372,6 +372,37 @@ class ChatBubbleStylePolicyTest {
                 "wxid_alice:\n<voicemsg />"
             )
         )
+        assertEquals(
+            "wxid_alice",
+            ChatBubbleStylePolicy.senderKeyForGrouping(
+                ChatBubbleStylePolicy.Side.LEFT,
+                "demo@chatroom",
+                "<msg><voicemsg fromusername=\"wxid_alice\" /></msg>"
+            )
+        )
+        assertEquals(
+            "wxid_alice",
+            ChatBubbleStylePolicy.senderKeyForGrouping(
+                ChatBubbleStylePolicy.Side.LEFT,
+                "demo@chatroom",
+                "<msg><voicemsg username=\"wxid_alice\" /></msg>"
+            )
+        )
+        assertEquals(
+            "evilshooter",
+            ChatBubbleStylePolicy.senderKeyForGrouping(
+                ChatBubbleStylePolicy.Side.LEFT,
+                "demo@chatroom",
+                "evilshooter:7602:0  "
+            )
+        )
+        assertNull(
+            ChatBubbleStylePolicy.senderKeyForGrouping(
+                ChatBubbleStylePolicy.Side.LEFT,
+                "demo@chatroom",
+                "<msg username=\"wxid_contact\"><nickname>shared card</nickname></msg>"
+            )
+        )
         assertNull(
             ChatBubbleStylePolicy.senderKeyForGrouping(
                 ChatBubbleStylePolicy.Side.LEFT,
@@ -529,7 +560,7 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
-    fun nonTextMessagesStopRenderStateGrouping() {
+    fun nonRenderableMessagesStopRenderStateGrouping() {
         val rows = listOf(
             row("1", ChatBubbleStylePolicy.Side.RIGHT, "self", 1_000L, "a"),
             row("2", ChatBubbleStylePolicy.Side.RIGHT, "self", 2_000L, "b"),
@@ -541,6 +572,55 @@ class ChatBubbleStylePolicyTest {
         assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("1").position)
         assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("2").position)
         assertFalse(states.containsKey("img"))
+    }
+
+    @Test
+    fun renderableMediaAndCardRowsGroupBySenderAndTimeWithoutTextFlag() {
+        val rows = listOf(
+            row(
+                stableKey = "voice",
+                side = ChatBubbleStylePolicy.Side.LEFT,
+                senderKey = "alice",
+                createTimeMs = 1_000L,
+                text = "<voicemsg />",
+                isTextMessage = false,
+                groupKey = "voice"
+            ),
+            row(
+                stableKey = "image",
+                side = ChatBubbleStylePolicy.Side.LEFT,
+                senderKey = "alice",
+                createTimeMs = 2_000L,
+                text = "<img />",
+                isTextMessage = false,
+                groupKey = "image"
+            ),
+            row(
+                stableKey = "video",
+                side = ChatBubbleStylePolicy.Side.LEFT,
+                senderKey = "alice",
+                createTimeMs = 3_000L,
+                text = "<videomsg />",
+                isTextMessage = false,
+                groupKey = "image"
+            ),
+            row(
+                stableKey = "card",
+                side = ChatBubbleStylePolicy.Side.LEFT,
+                senderKey = "alice",
+                createTimeMs = 4_000L,
+                text = "<appmsg />",
+                isTextMessage = false,
+                groupKey = "card"
+            )
+        )
+
+        val states = ChatBubbleStylePolicy.resolveRenderStates(rows)
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("voice").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.MIDDLE, states.getValue("image").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.MIDDLE, states.getValue("video").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("card").position)
     }
 
     @Test
@@ -713,6 +793,41 @@ class ChatBubbleStylePolicyTest {
 
         assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("voice1").position)
         assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("voice2").position)
+    }
+
+    @Test
+    fun mixedTextImageAndVoiceRowsKeepAdjacentSenderGroups() {
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(
+                row("skirt1", ChatBubbleStylePolicy.Side.LEFT, "wxid_skirt", 1_000L, "不是加上嘉业的一共4套？"),
+                row("skirt2", ChatBubbleStylePolicy.Side.LEFT, "wxid_skirt", 34_000L, "是指多一本说明书？"),
+                row(
+                    stableKey = "skirt-image",
+                    side = ChatBubbleStylePolicy.Side.LEFT,
+                    senderKey = "wxid_skirt",
+                    createTimeMs = 34_001L,
+                    text = "<img />",
+                    isTextMessage = false,
+                    groupKey = "image"
+                ),
+                row("a0-text", ChatBubbleStylePolicy.Side.LEFT, "evilshooter", 50_000L, "一套"),
+                row(
+                    stableKey = "a0-voice",
+                    side = ChatBubbleStylePolicy.Side.LEFT,
+                    senderKey = "evilshooter",
+                    createTimeMs = 99_000L,
+                    text = "evilshooter:4713:0",
+                    isTextMessage = false,
+                    groupKey = "voice"
+                )
+            )
+        )
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("skirt1").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.MIDDLE, states.getValue("skirt2").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("skirt-image").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.TOP, states.getValue("a0-text").position)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("a0-voice").position)
     }
 
     @Test

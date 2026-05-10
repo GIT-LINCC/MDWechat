@@ -78,14 +78,6 @@ object ModernChatBubbleStyler {
             }
         }
     )
-    private val observedTimeSeparatorBeforeKeys = Collections.synchronizedMap(
-        object : LinkedHashMap<String, Boolean>(128, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean {
-                return size > 1200
-            }
-        }
-    )
-
     data class RenderContext(
         val state: ChatBubbleStylePolicy.RenderState,
         val adapter: Any?,
@@ -228,7 +220,12 @@ object ModernChatBubbleStyler {
             return false
         }
         val normalizedItem = findItemRoot(itemView) ?: itemView
-        val decision = computeDecisionFromAdapter(adapter, position) ?: return false
+        val state = resolveRenderStateFromVisibleAdapterItem(adapter, position, normalizedItem)
+        val decision = if (state != null) {
+            BubbleDecision(state.side, state.position, false)
+        } else {
+            computeDecisionFromAdapter(adapter, position)
+        } ?: return false
         setPendingDecision(normalizedItem, decision)
         return true
     }
@@ -242,6 +239,21 @@ object ModernChatBubbleStyler {
         if (info == null) {
             diagnoseRejectedItem(normalizedItem)
             return false
+        }
+        resolveRenderStateFromVisibleAdapterItem(adapter, position, normalizedItem)?.let { state ->
+            rememberBoundRenderStateOnView(adapter, position, state.stableKey, normalizedItem)
+            rememberBoundRenderStateOnView(adapter, position, state.stableKey, info.messageView)
+            applyMessageVisuals(
+                msgView = info.messageView,
+                side = state.side,
+                position = state.position,
+                stableKey = state.stableKey,
+                itemView = info.itemView,
+                marginTarget = info.messageView.parent as? View ?: info.itemView,
+                avatarView = info.avatarView,
+                nicknameView = info.nicknameView
+            )
+            return true
         }
         val window = AdapterMessageReader.readWindow(
             adapter = adapter,
@@ -346,7 +358,7 @@ object ModernChatBubbleStyler {
         itemView.postDelayed({
             val root = findItemRoot(itemView) ?: itemView
             val applied = applyFromAdapterBindAndVisibleNeighbors(adapter, position, root)
-            val state = if (applied) resolveRenderStateFromAdapter(adapter, position) else null
+            val state = if (applied) resolveRenderStateFromVisibleAdapterItem(adapter, position, root) else null
             val shouldRetry = state == null || state.position == GroupPosition.SINGLE
             if (shouldRetry && attempt + 1 < legacyAppendRefreshDelaysMs.size) {
                 scheduleLegacyAppendRefreshAttempt(adapter, position, root, attempt + 1)
@@ -436,12 +448,32 @@ object ModernChatBubbleStyler {
         return extractText(view)
     }
 
+    fun hasVisibleTimeSeparatorBefore(itemView: View?): Boolean {
+        val root = itemView?.let { findItemRoot(it) ?: it } ?: return false
+        return findTimeSeparatorView(root) != null
+    }
+
     fun resolveRenderStateFromAdapter(adapter: Any, position: Int): ChatBubbleStylePolicy.RenderState? {
         return resolveRenderStateFromAdapter(
             adapter = adapter,
             position = position,
             hasTimeBeforeCurrent = false,
             hasTimeBeforeNext = false
+        )
+    }
+
+    fun resolveRenderStateFromVisibleAdapterItem(
+        adapter: Any,
+        position: Int,
+        itemView: View
+    ): ChatBubbleStylePolicy.RenderState? {
+        val root = findItemRoot(itemView) ?: itemView
+        val nextRoot = adjacentVisibleItem(root, step = 1)?.let { findItemRoot(it) ?: it }
+        return resolveRenderStateFromAdapter(
+            adapter = adapter,
+            position = position,
+            hasTimeBeforeCurrent = hasVisibleTimeSeparatorBefore(root),
+            hasTimeBeforeNext = hasVisibleTimeSeparatorBefore(nextRoot)
         )
     }
 
@@ -466,12 +498,6 @@ object ModernChatBubbleStyler {
             window.entries.getOrNull(currentIndex + 1)
         } else {
             null
-        }
-        if (hasTimeBeforeCurrent) {
-            rememberObservedTimeSeparatorBefore(current.stableKey)
-        }
-        if (hasTimeBeforeNext) {
-            rememberObservedTimeSeparatorBefore(nextEntry?.meta?.stableKey)
         }
         val rows = window.entries.map { entry ->
             entry.meta.toMessageRow(
@@ -506,16 +532,11 @@ object ModernChatBubbleStyler {
         val timeBeforeByStableKey = matchedItems.associate { (visibleItem, matchedEntry) ->
             matchedEntry.meta.stableKey to visibleItem.info.hasTimeSeparator
         }
-        timeBeforeByStableKey
-            .filterValues { it }
-            .keys
-            .forEach { rememberObservedTimeSeparatorBefore(it) }
         val states = ChatBubbleStylePolicy.resolveRenderStates(
             window.entries.map { entry ->
                 entry.meta.toMessageRow(
                     hasTimeSeparatorBefore = timeBeforeByPosition[entry.position] == true ||
-                            timeBeforeByStableKey[entry.meta.stableKey] == true ||
-                            hasObservedTimeSeparatorBefore(entry.meta.stableKey)
+                            timeBeforeByStableKey[entry.meta.stableKey] == true
                 )
             }
         )
@@ -532,16 +553,6 @@ object ModernChatBubbleStyler {
         AdapterMessageReader.invalidate(adapter)
     }
 
-    private fun rememberObservedTimeSeparatorBefore(stableKey: String?) {
-        if (!stableKey.isNullOrBlank()) {
-            observedTimeSeparatorBeforeKeys[stableKey] = true
-        }
-    }
-
-    private fun hasObservedTimeSeparatorBefore(stableKey: String): Boolean {
-        return observedTimeSeparatorBeforeKeys[stableKey] == true
-    }
-
     private fun hasTimeSeparatorBefore(
         entry: WindowEntry,
         currentStableKey: String,
@@ -550,8 +561,7 @@ object ModernChatBubbleStyler {
         hasTimeBeforeNext: Boolean
     ): Boolean {
         return entry.meta.stableKey == currentStableKey && hasTimeBeforeCurrent ||
-                entry.meta.stableKey == nextStableKey && hasTimeBeforeNext ||
-                hasObservedTimeSeparatorBefore(entry.meta.stableKey)
+                entry.meta.stableKey == nextStableKey && hasTimeBeforeNext
     }
 
     fun resolveRenderStateFromMessage(msgInfo: Any): ChatBubbleStylePolicy.RenderState? {
@@ -590,7 +600,7 @@ object ModernChatBubbleStyler {
             readAdapterPositionFromHolder(holder)
         }
         if (adapter != null && position >= 0) {
-            resolveRenderStateFromAdapter(adapter, position)?.let {
+            resolveRenderStateFromVisibleAdapterItem(adapter, position, itemView)?.let {
                 return RenderContext(it, adapter, position)
             }
         }
@@ -738,7 +748,21 @@ object ModernChatBubbleStyler {
         }
 
         val matchedItems = matchVisibleItems(window, visibleItems)
-        debugVisibleResolution(recycler, adapter, window, visibleItems, matchedItems, states = null)
+        val timeBeforeByPosition = matchedItems.associate { (visibleItem, matchedEntry) ->
+            matchedEntry.position to visibleItem.info.hasTimeSeparator
+        }
+        val timeBeforeByStableKey = matchedItems.associate { (visibleItem, matchedEntry) ->
+            matchedEntry.meta.stableKey to visibleItem.info.hasTimeSeparator
+        }
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            window.entries.map { entry ->
+                entry.meta.toMessageRow(
+                    hasTimeSeparatorBefore = timeBeforeByPosition[entry.position] == true ||
+                            timeBeforeByStableKey[entry.meta.stableKey] == true
+                )
+            }
+        )
+        debugVisibleResolution(recycler, adapter, window, visibleItems, matchedItems, states)
         val visibleByMatchedPosition = matchedItems.associate { (visibleItem, matchedEntry) ->
             matchedEntry.position to visibleItem
         }
@@ -748,6 +772,21 @@ object ModernChatBubbleStyler {
         var applied = 0
         for ((visibleItem, matchedEntry) in matchedItems) {
             rememberWindowEntry(adapter, visibleItem, matchedEntry)
+            val state = states[matchedEntry.meta.stableKey]
+            if (state != null) {
+                applyMessageVisuals(
+                    msgView = visibleItem.info.messageView,
+                    side = state.side,
+                    position = state.position,
+                    stableKey = state.stableKey,
+                    itemView = visibleItem.info.itemView,
+                    marginTarget = visibleItem.info.messageView.parent as? View ?: visibleItem.info.itemView,
+                    avatarView = visibleItem.info.avatarView,
+                    nicknameView = visibleItem.info.nicknameView
+                )
+                applied++
+                continue
+            }
             val hasTimeBeforeNext = visibleByMatchedPosition[matchedEntry.position + 1]
                 ?.info
                 ?.hasTimeSeparator == true
@@ -2295,23 +2334,45 @@ object ModernChatBubbleStyler {
         } catch (_: Throwable) {
             0
         }
-        if (id == 0 || root !is ViewGroup) {
+        val itemRoot = when {
+            getResourceEntryName(root) == resourceItemRoot -> root
+            else -> findItemRootByResource(root) ?: root
+        }
+        val group = itemRoot as? ViewGroup
+        if (id == 0 || group == null) {
             return null
         }
-        return findTimeSeparatorView(root, id)
-    }
-
-    private fun findTimeSeparatorView(root: View, id: Int): View? {
-        if (root.id == id && looksLikeTimeSeparator(extractText(root))) {
-            return root
-        }
-        val group = root as? ViewGroup ?: return null
         for (index in 0 until group.childCount) {
-            findTimeSeparatorView(group.getChildAt(index), id)?.let {
-                return it
+            val child = group.getChildAt(index)
+            if (child.id == id &&
+                isRenderableTimeSeparatorView(child) &&
+                looksLikeTimeSeparator(extractText(child))
+            ) {
+                return child
             }
         }
         return null
+    }
+
+    private fun isRenderableTimeSeparatorView(view: View): Boolean {
+        if (view.visibility != View.VISIBLE || view.alpha <= 0.01f) {
+            return false
+        }
+        val params = view.layoutParams
+        if (params?.width == 0 || params?.height == 0) {
+            return false
+        }
+        if (view.width > 0 && view.height > 0) {
+            return true
+        }
+        if (view.measuredWidth > 0 && view.measuredHeight > 0) {
+            return true
+        }
+        return params == null ||
+                params.width == ViewGroup.LayoutParams.WRAP_CONTENT ||
+                params.width == ViewGroup.LayoutParams.MATCH_PARENT ||
+                params.height == ViewGroup.LayoutParams.WRAP_CONTENT ||
+                params.height == ViewGroup.LayoutParams.MATCH_PARENT
     }
 
     private fun looksLikeTimeSeparator(text: String?): Boolean {

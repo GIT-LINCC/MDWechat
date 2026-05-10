@@ -46,9 +46,6 @@ object ModernChatBubbleRenderer {
     private const val resourceQuoteBackplate = "lgx"
     private const val keyOriginalAvatarHeight = "mdwechat_native_bubble_avatar_height"
     private const val keyAppliedSignature = "mdwechat_native_bubble_applied_signature"
-    private const val keyBoundaryRefreshSignature = "mdwechat_native_bubble_boundary_refresh_signature"
-    private const val keyPendingAppendRefresh = "mdwechat_native_bubble_pending_append_refresh"
-    private const val keyPendingAttachedReapply = "mdwechat_native_bubble_pending_attached_reapply"
     private const val keyPendingMiniProgramMeasuredTune = "mdwechat_native_bubble_pending_mini_program_measured_tune"
     private const val keyPendingContactMeasuredTune = "mdwechat_native_bubble_pending_contact_measured_tune"
     private const val keyPendingPaymentMeasuredTune = "mdwechat_native_bubble_pending_payment_measured_tune"
@@ -69,7 +66,6 @@ object ModernChatBubbleRenderer {
     private const val probeFile = "native_bubble_renderer.txt"
     private const val enableRendererProbe = false
     private const val enableGenericRichCardHeuristic = false
-    private val appendRefreshDelaysMs = longArrayOf(80L, 220L, 520L, 900L)
     private val probeKeys = mutableSetOf<String>()
     private val timeTextPattern = Regex("^\\d{1,2}:\\d{2}$")
     private val resourceIdCache = Collections.synchronizedMap(WeakHashMap<Context, MutableMap<String, Int>>())
@@ -100,14 +96,7 @@ object ModernChatBubbleRenderer {
 
     fun applyFromAdapterBind(adapter: Any, position: Int, itemView: View): Boolean {
         val root = findItemRoot(itemView) ?: itemView
-        val splitBefore = hasVisibleTimeSeparator(root)
-        val splitAfter = nextVisibleItem(root)?.let { hasVisibleTimeSeparator(it) } == true
-        val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(
-            adapter = adapter,
-            position = position,
-            hasTimeBeforeCurrent = splitBefore,
-            hasTimeBeforeNext = splitAfter
-        )
+        val state = ModernChatBubbleStyler.resolveRenderStateFromVisibleAdapterItem(adapter, position, root)
         if (state == null) {
             probe(itemView, "adapter.noState:${adapter.javaClass.name}:$position")
             debug(itemView, "adapterBind noState adapter=${adapter.javaClass.name} pos=$position")
@@ -120,34 +109,8 @@ object ModernChatBubbleRenderer {
         )
         ModernChatBubbleStyler.rememberBoundRenderState(adapter, position, root, state)
         val applied = applyState(root, state, "adapter:${adapter.javaClass.simpleName}:$position")
-        scheduleAttachedReapplyIfNeeded(adapter, position, root, state)
-        if (applied) {
-            refreshPreviousItemAcrossTimeSeparator(adapter, position, root)
-            refreshVisibleNeighborItemsIfNeeded(adapter, position, root, state)
-        }
+        refreshVisibleNeighborItemsIfNeeded(adapter, position, root, state)
         return applied
-    }
-
-    private fun scheduleAttachedReapplyIfNeeded(
-        adapter: Any,
-        position: Int,
-        itemView: View,
-        state: ChatBubbleStylePolicy.RenderState
-    ) {
-        if (state.side != ChatBubbleStylePolicy.Side.LEFT ||
-            state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE ||
-            findRecyclerParent(itemView) != null ||
-            XposedHelpers.getAdditionalInstanceField(itemView, keyPendingAttachedReapply) == true
-        ) {
-            return
-        }
-        XposedHelpers.setAdditionalInstanceField(itemView, keyPendingAttachedReapply, true)
-        itemView.post {
-            XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingAttachedReapply)
-            if (findRecyclerParent(itemView) != null) {
-                applyFromAdapterBind(adapter, position, itemView)
-            }
-        }
     }
 
     fun applyVisibleChildrenFromAdapter(recycler: ViewGroup, adapter: Any): Int {
@@ -177,7 +140,7 @@ object ModernChatBubbleRenderer {
         }
         val applied = applyState(boundView, context.state, "chatItem:${msgInfo.javaClass.simpleName}")
         val itemView = findItemRoot(boundView) ?: boundView
-        if (applied && context.adapter != null && context.position >= 0) {
+        if (context.adapter != null && context.position >= 0) {
             refreshVisibleNeighborItemsIfNeeded(context.adapter, context.position, itemView, context.state)
         }
         return applied
@@ -206,7 +169,7 @@ object ModernChatBubbleRenderer {
             debug(itemView, "$source deferTopEdgeText item=${boundsText(itemView)} text=${shortText(text)}")
             return false
         }
-        val renderState = applyVisibleBoundaries(itemView, state)
+        val renderState = state
         val palette = paletteForTarget(target, renderState)
         val signature = renderSignature(renderState, text, palette)
         if (isCurrentRender(itemView, bubbleView, renderState, signature)) {
@@ -214,7 +177,6 @@ object ModernChatBubbleRenderer {
             tuneRichCardContent(target)
             tuneMediaContent(target)
             debugApply(itemView, bubbleView, renderState, source, text, "current")
-            scheduleBoundaryRefresh(itemView, state, renderState, source)
             return true
         }
         clearOriginalBubbleContainers(bubbleView)
@@ -264,7 +226,6 @@ object ModernChatBubbleRenderer {
         XposedHelpers.setAdditionalInstanceField(itemView, keyAppliedSignature, signature)
         probe(bubbleView, "$source.applied:${renderState.side}:${renderState.position}:${target.kind}:${text.take(16)}")
         debugApply(itemView, bubbleView, renderState, source, text, "applied")
-        scheduleBoundaryRefresh(itemView, state, renderState, source)
         return true
     }
 
@@ -306,167 +267,12 @@ object ModernChatBubbleRenderer {
             return
         }
         val root = findItemRoot(itemView) ?: itemView
-        val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(
+        val state = ModernChatBubbleStyler.resolveRenderStateFromVisibleAdapterItem(
             adapter = adapter,
             position = position,
-            hasTimeBeforeCurrent = hasVisibleTimeSeparator(root),
-            hasTimeBeforeNext = nextVisibleItem(root)?.let { hasVisibleTimeSeparator(it) } == true
+            itemView = root
         ) ?: return
         applyState(root, state, "adapter-$source:${adapter.javaClass.simpleName}:$position")
-    }
-
-    private fun scheduleRightAppendRefresh(
-        boundView: View,
-        holder: Any?,
-        msgInfo: Any,
-        initialContext: ModernChatBubbleStyler.RenderContext
-    ) {
-        if (initialContext.adapter != null &&
-            initialContext.position >= 0 &&
-            initialContext.state.position != ChatBubbleStylePolicy.GroupPosition.SINGLE
-        ) {
-            return
-        }
-        val itemView = findItemRoot(boundView) ?: boundView
-        if (XposedHelpers.getAdditionalInstanceField(itemView, keyPendingAppendRefresh) == true) {
-            return
-        }
-        XposedHelpers.setAdditionalInstanceField(itemView, keyPendingAppendRefresh, true)
-        scheduleRightAppendRefreshAttempt(itemView, holder, msgInfo, attempt = 0)
-    }
-
-    private fun scheduleRightAppendRefreshAttempt(
-        itemView: View,
-        holder: Any?,
-        msgInfo: Any,
-        attempt: Int
-    ) {
-        val delay = appendRefreshDelaysMs.getOrNull(attempt)
-        if (delay == null) {
-            XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingAppendRefresh)
-            return
-        }
-        itemView.postDelayed({
-            val root = findItemRoot(itemView) ?: itemView
-            val context = ModernChatBubbleStyler.resolveRenderContextFromChattingItemBind(root, holder, msgInfo)
-            val shouldRetry = if (context != null && context.state.side == ChatBubbleStylePolicy.Side.RIGHT) {
-                val applied = applyState(root, context.state, "chatItem-delayed:${attempt + 1}")
-                if (applied && context.adapter != null && context.position >= 0) {
-                    refreshVisibleNeighborItemsIfNeeded(context.adapter, context.position, root, context.state)
-                }
-                context.adapter == null ||
-                        context.position < 0 ||
-                        context.state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE
-            } else {
-                true
-            }
-            if (shouldRetry && attempt + 1 < appendRefreshDelaysMs.size) {
-                scheduleRightAppendRefreshAttempt(root, holder, msgInfo, attempt + 1)
-            } else {
-                XposedHelpers.removeAdditionalInstanceField(root, keyPendingAppendRefresh)
-                if (root !== itemView) {
-                    XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingAppendRefresh)
-                }
-            }
-        }, delay)
-    }
-
-    private fun applyVisibleBoundaries(
-        itemView: View,
-        state: ChatBubbleStylePolicy.RenderState
-    ): ChatBubbleStylePolicy.RenderState {
-        val splitBefore = hasVisibleTimeSeparator(itemView)
-        val splitAfter = nextVisibleItem(itemView)?.let { hasVisibleTimeSeparator(it) } == true
-        if (!splitBefore && !splitAfter) {
-            return state
-        }
-        val hasPrevious = !splitBefore && when (state.position) {
-            ChatBubbleStylePolicy.GroupPosition.MIDDLE,
-            ChatBubbleStylePolicy.GroupPosition.BOTTOM -> true
-            ChatBubbleStylePolicy.GroupPosition.TOP,
-            ChatBubbleStylePolicy.GroupPosition.SINGLE -> false
-        }
-        val hasNext = !splitAfter && when (state.position) {
-            ChatBubbleStylePolicy.GroupPosition.TOP,
-            ChatBubbleStylePolicy.GroupPosition.MIDDLE -> true
-            ChatBubbleStylePolicy.GroupPosition.BOTTOM,
-            ChatBubbleStylePolicy.GroupPosition.SINGLE -> false
-        }
-        val position = ChatBubbleStylePolicy.groupPosition(hasPrevious = hasPrevious, hasNext = hasNext)
-        if (position == state.position) {
-            return state
-        }
-        return state.copy(
-            position = position,
-            showAvatar = ChatBubbleStylePolicy.showAvatar(position),
-            showNickname = ChatBubbleStylePolicy.showNickname(state.side, position),
-            topMarginDp = ChatBubbleStylePolicy.topMarginDp(position),
-            cornerRadii = ChatBubbleStylePolicy.cornerRadii(state.side, position)
-        )
-    }
-
-    private fun scheduleBoundaryRefresh(
-        itemView: View,
-        state: ChatBubbleStylePolicy.RenderState,
-        appliedState: ChatBubbleStylePolicy.RenderState,
-        source: String
-    ) {
-        if (state.position == ChatBubbleStylePolicy.GroupPosition.SINGLE) {
-            return
-        }
-        val refreshSignature = "${state.stableKey}:${state.position}:${appliedState.position}"
-        if (XposedHelpers.getAdditionalInstanceField(itemView, keyBoundaryRefreshSignature) == refreshSignature) {
-            return
-        }
-        XposedHelpers.setAdditionalInstanceField(itemView, keyBoundaryRefreshSignature, refreshSignature)
-    }
-
-    private fun refreshPreviousItemAcrossTimeSeparator(adapter: Any, position: Int, itemView: View) {
-        if (!hasVisibleTimeSeparator(itemView) || position <= 0) {
-            return
-        }
-        val previousItem = previousVisibleMessageItem(itemView) ?: return
-        visibleBoundaryEndState(previousItem)?.let { previousState ->
-            applyState(previousItem, previousState, "visible-boundary:${adapter.javaClass.simpleName}:${position - 1}")
-            return
-        }
-        val previousState = ModernChatBubbleStyler.resolveRenderStateFromAdapter(
-            adapter = adapter,
-            position = position - 1,
-            hasTimeBeforeCurrent = hasVisibleTimeSeparator(previousItem),
-            hasTimeBeforeNext = true
-        ) ?: return
-        applyState(previousItem, previousState, "adapter-neighbor:${adapter.javaClass.simpleName}:${position - 1}")
-    }
-
-    private fun visibleBoundaryEndState(itemView: View): ChatBubbleStylePolicy.RenderState? {
-        val target = findBubbleTarget(itemView) ?: return null
-        val bubble = target.bubbleView.background as? ModernBubbleDrawable ?: return null
-        val position = ChatBubbleStylePolicy.positionWithoutNext(bubble.position)
-        if (position == bubble.position) {
-            return null
-        }
-        return renderState(
-            stableKey = bubble.stableKey,
-            side = bubble.side,
-            position = position
-        )
-    }
-
-    private fun renderState(
-        stableKey: String,
-        side: ChatBubbleStylePolicy.Side,
-        position: ChatBubbleStylePolicy.GroupPosition
-    ): ChatBubbleStylePolicy.RenderState {
-        return ChatBubbleStylePolicy.RenderState(
-            stableKey = stableKey,
-            side = side,
-            position = position,
-            showAvatar = ChatBubbleStylePolicy.showAvatar(position),
-            showNickname = ChatBubbleStylePolicy.showNickname(side, position),
-            topMarginDp = ChatBubbleStylePolicy.topMarginDp(position),
-            cornerRadii = ChatBubbleStylePolicy.cornerRadii(side, position)
-        )
     }
 
     private fun clearOriginalBubbleContainers(messageView: View) {
@@ -1620,7 +1426,7 @@ object ModernChatBubbleRenderer {
         setNicknameVisibility(findNicknameView(itemView), state.showNickname)
         resetAvatarPlacement(avatarView)
         if (target.kind != "text" && state.showAvatar) {
-            alignVisibleAvatarToBubbleBottom(itemView, target.layoutView, state, schedule = true)
+            alignVisibleAvatarToBubbleBottom(itemView, target.layoutView, state)
         }
     }
 
@@ -2597,14 +2403,6 @@ object ModernChatBubbleRenderer {
         return false
     }
 
-    private fun previousVisibleMessageItem(itemView: View): View? {
-        return adjacentVisibleItem(itemView, step = -1, requireMessage = true)
-    }
-
-    private fun nextVisibleItem(itemView: View): View? {
-        return adjacentVisibleItem(itemView, step = 1, requireMessage = false)
-    }
-
     private fun adjacentVisibleItem(itemView: View, step: Int, requireMessage: Boolean): View? {
         val parent = findRecyclerParent(itemView) ?: itemView.parent as? ViewGroup ?: return null
         val currentTop = screenTop(itemView)
@@ -2673,11 +2471,6 @@ object ModernChatBubbleRenderer {
         val compactAtTopEdge = itemTop <= recyclerTop + tolerance &&
                 itemView.height in 1..dp(itemView, 72f)
         return clippedThroughTop || compactAtTopEdge
-    }
-
-    private fun hasVisibleTimeSeparator(itemView: View): Boolean {
-        val view = findViewByResourceName(itemView, resourceNickname) ?: return false
-        return isTimeSeparatorView(view)
     }
 
     private fun isTimeSeparatorView(view: View): Boolean {
@@ -2788,8 +2581,7 @@ object ModernChatBubbleRenderer {
     private fun alignVisibleAvatarToBubbleBottom(
         itemView: View,
         bubbleView: View,
-        state: ChatBubbleStylePolicy.RenderState,
-        schedule: Boolean
+        state: ChatBubbleStylePolicy.RenderState
     ) {
         if (!state.showAvatar) {
             return

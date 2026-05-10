@@ -321,7 +321,7 @@ object ChatBubbleStylePolicy {
         val states = LinkedHashMap<String, RenderState>()
         rows.forEachIndexed { index, row ->
             val side = row.side ?: return@forEachIndexed
-            if (!row.isTextMessage) {
+            if (!row.isRenderableForGrouping()) {
                 return@forEachIndexed
             }
             val previous = rows.getOrNull(index - 1)
@@ -357,7 +357,7 @@ object ChatBubbleStylePolicy {
         if (neighbor == null) {
             return false
         }
-        if (!current.isTextMessage || !neighbor.isTextMessage) {
+        if (!current.isRenderableForGrouping() || !neighbor.isRenderableForGrouping()) {
             return false
         }
         if (current.side == null || current.side != neighbor.side) {
@@ -374,6 +374,8 @@ object ChatBubbleStylePolicy {
 
     fun senderKeyForGrouping(side: Side?, talker: String?, content: String?): String? {
         val embeddedSender = extractGroupSenderPrefix(content)
+            ?: extractVoiceSenderPrefix(content)
+            ?: extractGroupSenderAttribute(content)
         val groupConversation = isGroupConversationId(talker)
         return when (side) {
             Side.RIGHT -> "self"
@@ -399,6 +401,45 @@ object ChatBubbleStylePolicy {
             return null
         }
         return text.substring(0, index).takeIf { it.isNotBlank() }
+    }
+
+    private fun extractVoiceSenderPrefix(content: String?): String? {
+        val text = content?.trimStart() ?: return null
+        val match = Regex("""^([A-Za-z0-9_@.\-]{2,80}):\d{1,8}:\d+""").find(text) ?: return null
+        return match.groupValues.getOrNull(1)?.takeIf { it.isNotBlank() }
+    }
+
+    private fun MessageCandidate.isRenderableForGrouping(): Boolean {
+        return isTextMessage || !groupKey.isNullOrBlank()
+    }
+
+    private fun MessageRow.isRenderableForGrouping(): Boolean {
+        return isTextMessage || !groupKey.isNullOrBlank()
+    }
+
+    private fun extractGroupSenderAttribute(content: String?): String? {
+        val text = content ?: return null
+        val fromUsername = Regex("""\bfromusername\s*=\s*(['"])([^'"]+)\1""", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(2)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        if (fromUsername != null) {
+            return fromUsername
+        }
+        val voiceStart = text.indexOf("<voicemsg", ignoreCase = true)
+        if (voiceStart < 0) {
+            return null
+        }
+        val voiceEnd = text.indexOf(">", voiceStart).let { if (it >= 0) it else text.length }
+        val voiceTag = text.substring(voiceStart, voiceEnd)
+        return Regex("""\busername\s*=\s*(['"])([^'"]+)\1""", RegexOption.IGNORE_CASE)
+            .find(voiceTag)
+            ?.groupValues
+            ?.getOrNull(2)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
     }
 
     fun isTextLikeWechatMessage(type: Int?, content: String?): Boolean {
