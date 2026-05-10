@@ -69,10 +69,13 @@ object ModernChatBubbleRenderer {
     private const val webSharePreviewSizeDp = 56f
     private const val webSharePreviewRadiusDp = 12f
     private const val probeFile = "native_bubble_renderer.txt"
+    private const val mediaProbeFile = "native_bubble_media_probe.txt"
     private const val enableRendererProbe = false
+    private const val enableMediaBubbleProbe = true
     private const val enableGenericRichCardHeuristic = false
     private val rowChromeSyncDelaysMs = longArrayOf(80L, 240L)
     private val probeKeys = mutableSetOf<String>()
+    private val mediaProbeKeys = mutableSetOf<String>()
     private val timeTextPattern = Regex("^\\d{1,2}:\\d{2}$")
     private val resourceIdCache = Collections.synchronizedMap(WeakHashMap<Context, MutableMap<String, Int>>())
 
@@ -175,6 +178,9 @@ object ModernChatBubbleRenderer {
             probeAvatarApplyState(itemView, target = null, state = state, source = "$source.noBubble", text = null)
             probe(boundView, "$source.noBubble:${boundView.javaClass.name}:${resourceName(boundView)}")
             debug(boundView, "$source noBubbleTarget item=${resourceName(itemView)}")
+            if (enableMediaBubbleProbe) {
+                probeNoBubbleMediaCandidateIfNeeded(itemView, state, source)
+            }
             return false
         }
         val bubbleView = target.bubbleView
@@ -195,6 +201,9 @@ object ModernChatBubbleRenderer {
         val renderState = state
         val palette = paletteForTarget(target, renderState)
         val signature = renderSignature(renderState, text, palette)
+        if (enableMediaBubbleProbe) {
+            probeMediaTargetIfNeeded(itemView, target, renderState, source, text)
+        }
         if (isCurrentRender(itemView, bubbleView, renderState, signature)) {
             syncReusableState(itemView, target, renderState)
             tuneRichCardContent(target)
@@ -508,7 +517,7 @@ object ModernChatBubbleRenderer {
     }
 
     private fun tuneMediaContent(target: BubbleTarget) {
-        if (target.kind != "video") {
+        if (target.kind != "image" && target.kind != "video") {
             return
         }
         val imageView = findViewByResourceName(target.bubbleView, "bkm") as? ImageView ?: return
@@ -517,8 +526,10 @@ object ModernChatBubbleRenderer {
         }
         imageView.adjustViewBounds = false
         clearViewLayer(imageView)
-        listOf("bqy", "boy").forEach { name ->
-            findViewByResourceName(target.bubbleView, name)?.bringToFront()
+        if (target.kind == "video") {
+            listOf("bqy", "boy").forEach { name ->
+                findViewByResourceName(target.bubbleView, name)?.bringToFront()
+            }
         }
     }
 
@@ -2145,11 +2156,11 @@ object ModernChatBubbleRenderer {
 
     private fun findImageBubbleTargetByStructure(itemView: View): BubbleTarget? {
         if (findViewByResourceName(itemView, resourceMessage) != null ||
-            findViewByResourceName(itemView, resourceCallBubble) != null ||
             findViewByResourceName(itemView, resourceVoiceBubble) != null
         ) {
             return null
         }
+        findExplicitImageBubbleTarget(itemView)?.let { return it }
         val candidates = mutableListOf<ImageBubbleCandidate>()
         collectImageBubbleCandidates(itemView, itemView, candidates, depth = 0)
         val candidate = candidates.maxByOrNull { it.score } ?: return null
@@ -2161,6 +2172,34 @@ object ModernChatBubbleRenderer {
             applyTextPadding = false,
             layoutView = target,
             signatureText = "image:${target.width}x${target.height}",
+            clipToOutline = true
+        )
+    }
+
+    private fun findExplicitImageBubbleTarget(itemView: View): BubbleTarget? {
+        val mediaBubble = findViewByResourceName(itemView, resourceCallBubble) ?: return null
+        val imageView = findViewByResourceName(mediaBubble, "bkm") as? ImageView ?: return null
+        val durationText = renderedText(findViewByResourceName(mediaBubble, "boy"))
+        val hasVideoChrome = !durationText.isNullOrBlank() ||
+                findViewByResourceName(mediaBubble, "bqy") != null
+        if (hasVideoChrome) {
+            return null
+        }
+        findViewByResourceName(itemView, resourceAvatar)?.let { avatar ->
+            if (imageView === avatar || containsView(imageView, avatar) || containsView(avatar, imageView)) {
+                return null
+            }
+        }
+        return BubbleTarget(
+            bubbleView = mediaBubble,
+            textView = null,
+            kind = "image",
+            applyTextPadding = false,
+            layoutView = mediaBubble,
+            signatureText = imageView.contentDescription
+                ?.toString()
+                ?.takeIf { it.isNotBlank() }
+                ?: "image:bkm",
             clipToOutline = true
         )
     }
@@ -2612,6 +2651,160 @@ object ModernChatBubbleRenderer {
         }
         probeKeys.add(message)
         RuntimeProbe.append(view.context, probeFile, "ModernNativeBubble $message")
+    }
+
+    private fun probeMediaTargetIfNeeded(
+        itemView: View,
+        target: BubbleTarget,
+        state: ChatBubbleStylePolicy.RenderState,
+        source: String,
+        text: String
+    ) {
+        if (!enableMediaBubbleProbe || target.kind !in setOf("image", "video")) {
+            return
+        }
+        val treeMatch = when {
+            ViewTreeUtils.equals(VTTV.ChatLeftPictureItem.item, itemView) -> "left-picture"
+            ViewTreeUtils.equals(VTTV.ChatRightPictureItem.item, itemView) -> "right-picture"
+            else -> "unknown"
+        }
+        val images = collectDescendantImages(target.bubbleView)
+        val key = listOf(
+            treeMatch,
+            state.side.name,
+            state.position.name,
+            target.kind,
+            boundsKey(target.bubbleView),
+            images.joinToString("|") { boundsKey(it) },
+            text.hashCode().toString()
+        ).joinToString(":")
+        if (mediaProbeKeys.size >= 160 || !mediaProbeKeys.add(key)) {
+            return
+        }
+        val imageSummary = images
+            .take(6)
+            .joinToString(" || ") { describeImageForProbe(it) }
+            .ifBlank { "none" }
+        val message = buildString {
+            append("MediaBubble target ")
+            append("source=").append(source)
+            append(" tree=").append(treeMatch)
+            append(" side=").append(state.side)
+            append(" group=").append(state.position)
+            append(" kind=").append(target.kind)
+            append(" target=").append(describeViewForProbe(target.bubbleView))
+            append(" layout=").append(describeViewForProbe(target.layoutView))
+            append(" parents=").append(parentChainForProbe(target.bubbleView, maxDepth = 5))
+            append(" children=").append(directChildrenForProbe(target.bubbleView))
+            append(" images=").append(imageSummary)
+        }
+        RuntimeProbe.append(itemView.context, mediaProbeFile, message)
+    }
+
+    private fun probeNoBubbleMediaCandidateIfNeeded(
+        itemView: View,
+        state: ChatBubbleStylePolicy.RenderState,
+        source: String
+    ) {
+        if (!enableMediaBubbleProbe) {
+            return
+        }
+        val images = collectDescendantImages(itemView)
+        if (images.isEmpty()) {
+            return
+        }
+        val interestingImages = images.filter { image ->
+            val name = resourceName(image)
+            name in setOf("bkm", "bko") || isLikelyChatImage(itemView, image)
+        }
+        if (interestingImages.isEmpty()) {
+            return
+        }
+        val key = listOf(
+            "no-target",
+            state.side.name,
+            state.position.name,
+            boundsKey(itemView),
+            interestingImages.joinToString("|") { "${resourceName(it)}:${boundsKey(it)}" }
+        ).joinToString(":")
+        if (mediaProbeKeys.size >= 160 || !mediaProbeKeys.add(key)) {
+            return
+        }
+        val imageSummary = interestingImages
+            .take(8)
+            .joinToString(" || ") { describeImageForProbe(it) }
+        val message = buildString {
+            append("MediaBubble noTarget ")
+            append("source=").append(source)
+            append(" side=").append(state.side)
+            append(" group=").append(state.position)
+            append(" item=").append(describeViewForProbe(itemView))
+            append(" children=").append(directChildrenForProbe(itemView))
+            append(" images=").append(imageSummary)
+        }
+        RuntimeProbe.append(itemView.context, mediaProbeFile, message)
+    }
+
+    private fun collectDescendantImages(root: View): List<ImageView> {
+        val result = mutableListOf<ImageView>()
+        fun visit(view: View, depth: Int) {
+            if (depth > 8 || view.visibility != View.VISIBLE || result.size >= 8) {
+                return
+            }
+            if (view is ImageView) {
+                result += view
+            }
+            val group = view as? ViewGroup ?: return
+            for (index in 0 until group.childCount) {
+                visit(group.getChildAt(index), depth + 1)
+            }
+        }
+        visit(root, 0)
+        return result
+    }
+
+    private fun describeImageForProbe(image: ImageView): String {
+        return describeViewForProbe(image) +
+                "{scale=${image.scaleType},adjust=${image.adjustViewBounds},drawable=${image.drawable?.javaClass?.simpleName}}"
+    }
+
+    private fun parentChainForProbe(view: View, maxDepth: Int): String {
+        val parts = mutableListOf<String>()
+        var current: View? = view
+        var depth = 0
+        while (current != null && depth < maxDepth) {
+            parts += describeViewForProbe(current)
+            current = current.parent as? View
+            depth++
+        }
+        return parts.joinToString(" <- ")
+    }
+
+    private fun directChildrenForProbe(view: View): String {
+        val group = view as? ViewGroup ?: return "none"
+        val parts = mutableListOf<String>()
+        for (index in 0 until group.childCount.coerceAtMost(8)) {
+            parts += "$index:${describeViewForProbe(group.getChildAt(index))}"
+        }
+        return parts.joinToString(" | ").ifBlank { "none" }
+    }
+
+    private fun describeViewForProbe(view: View): String {
+        val group = view as? ViewGroup
+        return "${view.javaClass.name.substringAfterLast('.')}" +
+                "#${resourceName(view).orEmpty()}" +
+                "[${view.left},${view.top},${view.right},${view.bottom}]" +
+                " size=${view.width}x${view.height}" +
+                " pad=${view.paddingLeft},${view.paddingTop},${view.paddingRight},${view.paddingBottom}" +
+                " bg=${view.background?.javaClass?.simpleName}" +
+                " clip=${view.clipToOutline}" +
+                " cc=${group?.clipChildren}" +
+                " cp=${group?.clipToPadding}" +
+                " child=${group?.childCount ?: 0}"
+    }
+
+    private fun boundsKey(view: View): String {
+        return "${view.left},${view.top},${view.right},${view.bottom}:${view.width}x${view.height}"
     }
 
     private fun debug(view: View, message: String) {

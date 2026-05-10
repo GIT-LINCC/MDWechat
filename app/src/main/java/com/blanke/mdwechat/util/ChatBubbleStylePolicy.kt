@@ -252,17 +252,18 @@ object ChatBubbleStylePolicy {
     }
 
     fun imagePalette(): BubblePalette {
-        val bubbleColor = 0xFFFFFFFF.toInt()
+        val bubbleColor = TRANSPARENT_COLOR
         return BubblePalette(
             bubbleColor = bubbleColor,
-            pressedBubbleColor = scaleRgb(bubbleColor, 0.97f),
+            pressedBubbleColor = TRANSPARENT_COLOR,
             textColor = DEFAULT_LEFT_TEXT_COLOR,
-            semanticTextColor = dynamicSemanticTextColor(bubbleColor),
-            quoteFillColor = DEFAULT_LEFT_QUOTE_FILL_COLOR,
+            semanticTextColor = DEFAULT_LEFT_TEXT_COLOR,
+            quoteFillColor = TRANSPARENT_COLOR,
             quoteTextColor = DEFAULT_LEFT_QUOTE_TEXT_COLOR,
             quoteStrokeColor = TRANSPARENT_COLOR,
-            strokeColor = 0x14000000,
-            strokeWidthDp = 0.75f
+            strokeColor = TRANSPARENT_COLOR,
+            strokeWidthDp = 0f,
+            useGradient = false
         )
     }
 

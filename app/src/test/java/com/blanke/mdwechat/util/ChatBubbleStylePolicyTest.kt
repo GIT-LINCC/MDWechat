@@ -241,12 +241,14 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
-    fun imagePaletteUsesNeutralSurfaceInsteadOfSideTint() {
+    fun imagePaletteUsesTransparentMediaSurface() {
         val palette = ChatBubbleStylePolicy.imagePalette()
 
-        assertEquals(0xFFFFFFFF.toInt(), palette.bubbleColor)
-        assertEquals(0x14000000, palette.strokeColor)
-        assertEquals(0.75f, palette.strokeWidthDp, 0f)
+        assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, palette.bubbleColor)
+        assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, palette.pressedBubbleColor)
+        assertEquals(ChatBubbleStylePolicy.TRANSPARENT_COLOR, palette.strokeColor)
+        assertEquals(0f, palette.strokeWidthDp, 0f)
+        assertFalse(palette.useGradient)
     }
 
     @Test

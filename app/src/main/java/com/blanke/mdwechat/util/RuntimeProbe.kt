@@ -78,12 +78,24 @@ object RuntimeProbe {
     fun clear(context: Context?) {
         context ?: return
         try {
-            val file = getProbeFile(context)
-            if (file.exists()) {
-                file.delete()
+            clearProbeDir(File(context.filesDir, DIR_NAME))
+            clearProbeDir(File(Environment.getExternalStorageDirectory(), DIR_NAME + File.separator + "logs"))
+            context.getExternalFilesDir(null)?.let { baseDir ->
+                clearProbeDir(File(baseDir, DIR_NAME + File.separator + "logs"))
             }
         } catch (t: Throwable) {
             XposedBridge.log(t)
+        }
+    }
+
+    private fun clearProbeDir(dir: File) {
+        if (!dir.exists()) {
+            return
+        }
+        dir.listFiles()?.forEach { file ->
+            if (file.isFile && file.extension == "txt" && !file.name.startsWith("MDWechat_log_")) {
+                file.delete()
+            }
         }
     }
 }

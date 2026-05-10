@@ -200,7 +200,7 @@ class SettingsActivity : Activity() {
 
 
     private fun _clearLogs() {
-        LogUtil.clearFileLogs(SettingsFragment.STATIC.isLogFile)
+        LogUtil.clearFileLogs(SettingsFragment.STATIC.isLogFile, this)
         Toast.makeText(this, getString(R.string.msg_clear_ok), Toast.LENGTH_SHORT).show()
     }
 
