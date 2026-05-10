@@ -51,6 +51,7 @@ object ModernChatBubbleRenderer {
     private const val keyPendingPaymentMeasuredTune = "mdwechat_native_bubble_pending_payment_measured_tune"
     private const val keyPendingPositionMeasuredTune = "mdwechat_native_bubble_pending_position_measured_tune"
     private const val keyPendingWebShareMeasuredTune = "mdwechat_native_bubble_pending_web_share_measured_tune"
+    private const val keyPendingRowChromeSync = "mdwechat_native_bubble_pending_row_chrome_sync"
     private const val miniProgramReferenceCardWidth = 260f
     private const val miniProgramReferenceCardHeight = 234.75f
     private const val contactReferenceCardWidth = 240f
@@ -66,6 +67,7 @@ object ModernChatBubbleRenderer {
     private const val probeFile = "native_bubble_renderer.txt"
     private const val enableRendererProbe = false
     private const val enableGenericRichCardHeuristic = false
+    private val rowChromeSyncDelaysMs = longArrayOf(80L, 240L)
     private val probeKeys = mutableSetOf<String>()
     private val timeTextPattern = Regex("^\\d{1,2}:\\d{2}$")
     private val resourceIdCache = Collections.synchronizedMap(WeakHashMap<Context, MutableMap<String, Int>>())
@@ -154,6 +156,8 @@ object ModernChatBubbleRenderer {
         val itemView = findItemRoot(boundView) ?: boundView
         val target = findBubbleTarget(itemView)
         if (target == null) {
+            syncRowChromeState(itemView, target = null, state = state)
+            probeAvatarApplyState(itemView, target = null, state = state, source = "$source.noBubble", text = null)
             probe(boundView, "$source.noBubble:${boundView.javaClass.name}:${resourceName(boundView)}")
             debug(boundView, "$source noBubbleTarget item=${resourceName(itemView)}")
             return false
@@ -161,11 +165,15 @@ object ModernChatBubbleRenderer {
         val bubbleView = target.bubbleView
         val text = renderTextForSignature(target)
         if (text.isNullOrBlank()) {
+            syncRowChromeState(itemView, target, state)
+            probeAvatarApplyState(itemView, target, state, "$source.noText", text)
             probe(bubbleView, "$source.noText:${bubbleView.javaClass.name}:${resourceName(bubbleView)}:${target.kind}")
             debug(itemView, "$source noText target=${resourceName(bubbleView)} kind=${target.kind}")
             return false
         }
         if (shouldDeferCompactTopEdgeTextItem(itemView, target)) {
+            syncRowChromeState(itemView, target, state)
+            probeAvatarApplyState(itemView, target, state, "$source.deferTop", text)
             debug(itemView, "$source deferTopEdgeText item=${boundsText(itemView)} text=${shortText(text)}")
             return false
         }
@@ -177,6 +185,8 @@ object ModernChatBubbleRenderer {
             tuneRichCardContent(target)
             tuneMediaContent(target)
             debugApply(itemView, bubbleView, renderState, source, text, "current")
+            probeAvatarApplyState(itemView, target, renderState, "$source.current", text)
+            scheduleRowChromeSyncIfNeeded(itemView, target, renderState, source)
             return true
         }
         clearOriginalBubbleContainers(bubbleView)
@@ -226,6 +236,8 @@ object ModernChatBubbleRenderer {
         XposedHelpers.setAdditionalInstanceField(itemView, keyAppliedSignature, signature)
         probe(bubbleView, "$source.applied:${renderState.side}:${renderState.position}:${target.kind}:${text.take(16)}")
         debugApply(itemView, bubbleView, renderState, source, text, "applied")
+        probeAvatarApplyState(itemView, target, renderState, "$source.applied", text)
+        scheduleRowChromeSyncIfNeeded(itemView, target, renderState, source)
         return true
     }
 
@@ -235,44 +247,56 @@ object ModernChatBubbleRenderer {
         itemView: View,
         state: ChatBubbleStylePolicy.RenderState
     ) {
-        if (state.side != ChatBubbleStylePolicy.Side.RIGHT) {
-            return
-        }
         val appliedPosition = (findBubbleTarget(itemView)?.bubbleView?.background as? ModernBubbleDrawable)?.position
             ?: state.position
-        if (appliedPosition == ChatBubbleStylePolicy.GroupPosition.SINGLE) {
+        val shouldRefreshGroupNeighbors = state.side == ChatBubbleStylePolicy.Side.RIGHT &&
+                appliedPosition != ChatBubbleStylePolicy.GroupPosition.SINGLE
+        val shouldRefreshPreviousBoundary = ModernChatBubbleStyler.hasVisibleTimeSeparatorBefore(itemView)
+        if (!shouldRefreshGroupNeighbors && !shouldRefreshPreviousBoundary) {
             return
         }
         refreshVisibleNeighborItem(
             adapter = adapter,
             position = position - 1,
             itemView = adjacentVisibleItem(itemView, step = -1, requireMessage = true),
-            source = "prev"
+            source = "prev",
+            hasTimeBeforeNext = shouldRefreshPreviousBoundary
         )
-        refreshVisibleNeighborItem(
-            adapter = adapter,
-            position = position + 1,
-            itemView = adjacentVisibleItem(itemView, step = 1, requireMessage = true),
-            source = "next"
-        )
+        if (shouldRefreshGroupNeighbors) {
+            refreshVisibleNeighborItem(
+                adapter = adapter,
+                position = position + 1,
+                itemView = adjacentVisibleItem(itemView, step = 1, requireMessage = true),
+                source = "next"
+            )
+        }
     }
 
     private fun refreshVisibleNeighborItem(
         adapter: Any,
         position: Int,
         itemView: View?,
-        source: String
+        source: String,
+        hasTimeBeforeNext: Boolean? = null
     ) {
         if (position < 0 || itemView == null) {
             return
         }
         val root = findItemRoot(itemView) ?: itemView
-        val state = ModernChatBubbleStyler.resolveRenderStateFromVisibleAdapterItem(
+        val resolvedPosition = ModernChatBubbleStyler.rememberedAdapterPosition(adapter, root)
+            ?: position
+        val nextHasVisibleTime = hasTimeBeforeNext
+            ?: adjacentVisibleItem(root, step = 1, requireMessage = true)
+                ?.let { ModernChatBubbleStyler.hasVisibleTimeSeparatorBefore(it) }
+            ?: false
+        val state = ModernChatBubbleStyler.resolveRenderStateFromAdapter(
             adapter = adapter,
-            position = position,
-            itemView = root
+            position = resolvedPosition,
+            hasTimeBeforeCurrent = ModernChatBubbleStyler.hasVisibleTimeSeparatorBefore(root),
+            hasTimeBeforeNext = nextHasVisibleTime,
+            probeContext = root.context
         ) ?: return
-        applyState(root, state, "adapter-$source:${adapter.javaClass.simpleName}:$position")
+        applyState(root, state, "adapter-$source:${adapter.javaClass.simpleName}:$resolvedPosition")
     }
 
     private fun clearOriginalBubbleContainers(messageView: View) {
@@ -1421,11 +1445,19 @@ object ModernChatBubbleRenderer {
         target: BubbleTarget,
         state: ChatBubbleStylePolicy.RenderState
     ) {
+        syncRowChromeState(itemView, target, state)
+    }
+
+    private fun syncRowChromeState(
+        itemView: View,
+        target: BubbleTarget?,
+        state: ChatBubbleStylePolicy.RenderState
+    ) {
         val avatarView = findViewByResourceName(itemView, resourceAvatar)
         setAvatarVisibility(avatarView, state.showAvatar)
         setNicknameVisibility(findNicknameView(itemView), state.showNickname)
         resetAvatarPlacement(avatarView)
-        if (target.kind != "text" && state.showAvatar) {
+        if (target != null && target.kind != "text" && state.showAvatar) {
             alignVisibleAvatarToBubbleBottom(itemView, target.layoutView, state)
         }
     }
@@ -2315,6 +2347,31 @@ object ModernChatBubbleRenderer {
         )
     }
 
+    private fun probeAvatarApplyState(
+        itemView: View,
+        target: BubbleTarget?,
+        state: ChatBubbleStylePolicy.RenderState,
+        source: String,
+        text: String?
+    ) {
+        if (!ModernChatBubbleStyler.isAvatarGroupingProbeEnabled()) {
+            return
+        }
+        val avatarView = findViewByResourceName(itemView, resourceAvatar)
+        ModernChatBubbleStyler.probeAvatarApply(
+            context = itemView.context,
+            source = source,
+            state = state,
+            targetKind = target?.kind,
+            hasTimeBefore = ModernChatBubbleStyler.hasVisibleTimeSeparatorBefore(itemView),
+            hasAvatarView = avatarView != null,
+            avatarVisibility = visibilityName(avatarView),
+            nicknameText = renderedText(findNicknameView(itemView)),
+            text = text,
+            itemBounds = boundsText(itemView)
+        )
+    }
+
     private fun visibilityName(view: View?): String {
         return when (view?.visibility) {
             View.VISIBLE -> "VISIBLE"
@@ -2530,6 +2587,74 @@ object ModernChatBubbleRenderer {
     ) {
         syncMessageParentTopMargin(itemView, target.layoutView, state)
         syncAvatarAndNicknameState(itemView, target, state)
+    }
+
+    private fun scheduleRowChromeSyncIfNeeded(
+        itemView: View,
+        target: BubbleTarget,
+        state: ChatBubbleStylePolicy.RenderState,
+        source: String
+    ) {
+        if (target.kind == "text" || (!state.showAvatar && !state.showNickname)) {
+            return
+        }
+        val currentBubble = target.bubbleView.background as? ModernBubbleDrawable ?: return
+        if (currentBubble.stableKey != state.stableKey) {
+            return
+        }
+        val pendingKey = XposedHelpers.getAdditionalInstanceField(itemView, keyPendingRowChromeSync) as? String
+        if (pendingKey == state.stableKey) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(itemView, keyPendingRowChromeSync, state.stableKey)
+        rowChromeSyncDelaysMs.forEachIndexed { index, delayMs ->
+            itemView.postDelayed({
+                val delayedBubble = target.bubbleView.background as? ModernBubbleDrawable
+                if (delayedBubble?.stableKey == state.stableKey) {
+                    val delayedState = stateForCurrentBubble(state, delayedBubble)
+                    syncReusableState(itemView, target, delayedState)
+                    probeAvatarApplyState(
+                        itemView = itemView,
+                        target = target,
+                        state = delayedState,
+                        source = "$source.rowChrome$index",
+                        text = null
+                    )
+                } else {
+                    probeAvatarApplyState(
+                        itemView = itemView,
+                        target = null,
+                        state = state,
+                        source = "$source.rowChrome$index.miss",
+                        text = null
+                    )
+                }
+                if (index == rowChromeSyncDelaysMs.lastIndex &&
+                    XposedHelpers.getAdditionalInstanceField(itemView, keyPendingRowChromeSync) == state.stableKey
+                ) {
+                    XposedHelpers.removeAdditionalInstanceField(itemView, keyPendingRowChromeSync)
+                }
+            }, delayMs)
+        }
+    }
+
+    private fun stateForCurrentBubble(
+        state: ChatBubbleStylePolicy.RenderState,
+        drawable: ModernBubbleDrawable
+    ): ChatBubbleStylePolicy.RenderState {
+        if (drawable.side == state.side && drawable.position == state.position) {
+            return state
+        }
+        val side = drawable.side
+        val position = drawable.position
+        return state.copy(
+            side = side,
+            position = position,
+            showAvatar = ChatBubbleStylePolicy.showAvatar(position),
+            showNickname = ChatBubbleStylePolicy.showNickname(side, position),
+            topMarginDp = ChatBubbleStylePolicy.topMarginDp(position),
+            cornerRadii = ChatBubbleStylePolicy.cornerRadii(side, position)
+        )
     }
 
     private fun syncMessageParentTopMargin(

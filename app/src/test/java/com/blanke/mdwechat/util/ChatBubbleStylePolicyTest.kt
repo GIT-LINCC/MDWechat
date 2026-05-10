@@ -560,6 +560,34 @@ class ChatBubbleStylePolicyTest {
     }
 
     @Test
+    fun renderStatesStopAtTimeGapWhenWechatUsesSecondTimestamps() {
+        val rows = listOf(
+            row(
+                stableKey = "image",
+                side = ChatBubbleStylePolicy.Side.LEFT,
+                senderKey = "alice",
+                createTimeMs = 1_746_657_240L,
+                text = "<img />",
+                isTextMessage = false,
+                groupKey = "image"
+            ),
+            row(
+                stableKey = "text",
+                side = ChatBubbleStylePolicy.Side.LEFT,
+                senderKey = "alice",
+                createTimeMs = 1_746_743_640L,
+                text = "next day"
+            )
+        )
+
+        val states = ChatBubbleStylePolicy.resolveRenderStates(rows)
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.SINGLE, states.getValue("image").position)
+        assertTrue(states.getValue("image").showAvatar)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.SINGLE, states.getValue("text").position)
+    }
+
+    @Test
     fun nonRenderableMessagesStopRenderStateGrouping() {
         val rows = listOf(
             row("1", ChatBubbleStylePolicy.Side.RIGHT, "self", 1_000L, "a"),
@@ -780,6 +808,39 @@ class ChatBubbleStylePolicyTest {
         assertEquals(ChatBubbleStylePolicy.GroupPosition.BOTTOM, states.getValue("text2").position)
         assertEquals(ChatBubbleStylePolicy.GroupPosition.SINGLE, states.getValue("emoji").position)
         assertTrue(states.getValue("text2").showAvatar)
+    }
+
+    @Test
+    fun explicitTimeSeparatorsBetweenAdjacentMediaRowsKeepThemSingle() {
+        val states = ChatBubbleStylePolicy.resolveRenderStates(
+            listOf(
+                row(
+                    stableKey = "image13_09",
+                    side = ChatBubbleStylePolicy.Side.LEFT,
+                    senderKey = "alice",
+                    createTimeMs = 1_746_337_740_000L,
+                    text = "<img />",
+                    isTextMessage = false,
+                    hasTimeSeparatorBefore = true,
+                    groupKey = "image"
+                ),
+                row(
+                    stableKey = "image13_13",
+                    side = ChatBubbleStylePolicy.Side.LEFT,
+                    senderKey = "alice",
+                    createTimeMs = 1_746_337_980_000L,
+                    text = "<img />",
+                    isTextMessage = false,
+                    hasTimeSeparatorBefore = true,
+                    groupKey = "image"
+                )
+            )
+        )
+
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.SINGLE, states.getValue("image13_09").position)
+        assertTrue(states.getValue("image13_09").showAvatar)
+        assertEquals(ChatBubbleStylePolicy.GroupPosition.SINGLE, states.getValue("image13_13").position)
+        assertTrue(states.getValue("image13_13").showAvatar)
     }
 
     @Test

@@ -507,9 +507,18 @@ object ChatBubbleStylePolicy {
         newer: MessageRow?,
         thresholdMs: Long
     ): Boolean {
-        val olderTime = older?.createTimeMs ?: return false
-        val newerTime = newer?.createTimeMs ?: return false
+        val olderTime = older?.createTimeMs?.let { normalizeWechatCreateTimeMs(it) } ?: return false
+        val newerTime = newer?.createTimeMs?.let { normalizeWechatCreateTimeMs(it) } ?: return false
         return kotlin.math.abs(newerTime - olderTime) >= thresholdMs
+    }
+
+    fun normalizeWechatCreateTimeMs(rawTime: Long): Long {
+        val absTime = kotlin.math.abs(rawTime)
+        return if (absTime in 1_000_000_000L until 100_000_000_000L) {
+            rawTime * 1000L
+        } else {
+            rawTime
+        }
     }
 
     private fun isReferenceMessageContent(content: String?): Boolean {
