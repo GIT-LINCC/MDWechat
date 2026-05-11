@@ -35,6 +35,7 @@ object ModernChatBubbleHooker : HookerProvider {
     private const val keyPendingRecyclerApply = "mdwechat_modern_chat_bubble_pending_recycler_apply"
     private const val keyPendingRecyclerApplyDirty = "mdwechat_modern_chat_bubble_pending_recycler_apply_dirty"
     private const val keyLastDrawSignature = "mdwechat_modern_chat_bubble_last_draw_signature"
+    private const val keyIsChatRecyclerView = "mdwechat_modern_chat_bubble_is_chat_recycler"
     private const val bubbleProbeFile = "chat_bubble_probe.txt"
     private const val enableDrawApply = false
     private const val enableVisibleWindowApply = true
@@ -307,7 +308,12 @@ object ModernChatBubbleHooker : HookerProvider {
                             val holder = param?.args?.getOrNull(0) ?: return
                             val position = param.args?.getOrNull(1) as? Int ?: return
                             val itemView = extractItemView(holder) ?: return
+                            val recycler = findRecyclerParent(itemView)
+                            if (!shouldApplyAdapterBind(adapter, recycler)) {
+                                return
+                            }
                             hookConcreteAdapter(adapter.javaClass)
+                            recycler?.let { rememberRecyclerForAdapter(adapter, it) }
                             ModernChatBubbleRenderer.applyFromAdapterBind(adapter, position, itemView)
                         }
                     }
@@ -540,7 +546,11 @@ object ModernChatBubbleHooker : HookerProvider {
                     val holder = param.args?.getOrNull(0) ?: return
                     val position = param.args?.getOrNull(1) as? Int ?: return
                     val itemView = extractItemView(holder) ?: return
-                    val recycler = rememberRecyclerFromItem(adapter, itemView)
+                    val recycler = findRecyclerParent(itemView)
+                    if (!shouldApplyAdapterBind(adapter, recycler)) {
+                        return
+                    }
+                    recycler?.let { rememberRecyclerForAdapter(adapter, it) }
                     val applied = ModernChatBubbleRenderer.applyFromAdapterBind(adapter, position, itemView)
                     ModernChatBubbleStyler.debugBubbleProbe(
                         itemView.context,
@@ -740,6 +750,9 @@ object ModernChatBubbleHooker : HookerProvider {
     }
 
     private fun installRecyclerAdapterHooks(recycler: ViewGroup, source: String) {
+        if (!isChatRecyclerView(recycler)) {
+            return
+        }
         val adapter = getRecyclerAdapter(recycler) ?: return
         hookConcreteAdapter(adapter.javaClass)
         rememberRecyclerForAdapter(adapter, recycler)
@@ -826,12 +839,6 @@ object ModernChatBubbleHooker : HookerProvider {
                 scheduleRecyclerVisibleApply(recycler, source)
             }
         }
-    }
-
-    private fun rememberRecyclerFromItem(adapter: Any, itemView: View): ViewGroup? {
-        val recycler = findRecyclerParent(itemView) ?: return null
-        rememberRecyclerForAdapter(adapter, recycler)
-        return recycler
     }
 
     private fun rememberRecyclerForAdapter(adapter: Any, recycler: ViewGroup) {
@@ -1062,7 +1069,34 @@ object ModernChatBubbleHooker : HookerProvider {
         if (view !is ViewGroup || !isRecyclerViewLike(view)) {
             return false
         }
-        return getResourceEntryName(view) == "bp0"
+        (XposedHelpers.getAdditionalInstanceField(view, keyIsChatRecyclerView) as? Boolean)?.let {
+            return it
+        }
+        val isChat = getResourceEntryName(view) == "bp0"
+        XposedHelpers.setAdditionalInstanceField(view, keyIsChatRecyclerView, isChat)
+        return isChat
+    }
+
+    private fun shouldApplyAdapterBind(adapter: Any, recycler: ViewGroup?): Boolean {
+        if (recycler != null) {
+            return isChatRecyclerView(recycler)
+        }
+        return isKnownChatAdapter(adapter)
+    }
+
+    private fun isKnownChatAdapter(adapter: Any): Boolean {
+        var current: Class<*>? = adapter.javaClass
+        while (current != null && current != Any::class.java) {
+            val name = current.name
+            if (name.startsWith("com.tencent.mm.ui.chatting.adapter.") ||
+                name == "com.tencent.mm.pluginsdk.ui.tools.r0" ||
+                name == "com.tencent.mm.pluginsdk.ui.tools.r3"
+            ) {
+                return true
+            }
+            current = current.superclass
+        }
+        return false
     }
 
     private fun getResourceEntryName(view: View): String? {

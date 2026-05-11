@@ -277,8 +277,7 @@ public class FloatingActionMenu extends ViewGroup {
             attr.recycle();
         }
 
-        this.requestFocus();
-        this.setFocusableInTouchMode(true);
+        this.setFocusableInTouchMode(false);
     }
 
     private void initMenuButtonAnimations(TypedArray attr) {
@@ -417,6 +416,25 @@ public class FloatingActionMenu extends ViewGroup {
         int maxLabelWidth = 0;
 
         measureChildWithMargins(mImageToggle, widthMeasureSpec, 0, heightMeasureSpec, 0);
+        measureChildWithMargins(mMenuButton, widthMeasureSpec, 0, heightMeasureSpec, 0);
+
+        if (!shouldMeasureExpanded()) {
+            mMaxButtonWidth = Math.max(mMenuButton.getMeasuredWidth(), mImageToggle.getMeasuredWidth());
+            width = mMaxButtonWidth + getPaddingLeft() + getPaddingRight();
+            height = Math.max(mMenuButton.getMeasuredHeight(), mImageToggle.getMeasuredHeight())
+                    + getPaddingTop() + getPaddingBottom();
+
+            if (getLayoutParams().width == LayoutParams.MATCH_PARENT) {
+                width = getDefaultSize(getSuggestedMinimumWidth(), widthMeasureSpec);
+            }
+
+            if (getLayoutParams().height == LayoutParams.MATCH_PARENT) {
+                height = getDefaultSize(getSuggestedMinimumHeight(), heightMeasureSpec);
+            }
+
+            setMeasuredDimension(width, height);
+            return;
+        }
 
         for (int i = 0; i < mButtonsCount; i++) {
             View child = getChildAt(i);
@@ -460,6 +478,10 @@ public class FloatingActionMenu extends ViewGroup {
         }
 
         setMeasuredDimension(width, height);
+    }
+
+    private boolean shouldMeasureExpanded() {
+        return mMenuOpened || mIsMenuOpening;
     }
 
     @Override
@@ -749,6 +771,9 @@ public class FloatingActionMenu extends ViewGroup {
             int delay = 0;
             int counter = 0;
             mIsMenuOpening = true;
+            setFocusableInTouchMode(true);
+            requestFocus();
+            requestLayout();
             for (int i = getChildCount() - 1; i >= 0; i--) {
                 View child = getChildAt(i);
                 if (child instanceof FloatingActionButton && child.getVisibility() != GONE) {
@@ -834,6 +859,9 @@ public class FloatingActionMenu extends ViewGroup {
                 @Override
                 public void run() {
                     mMenuOpened = false;
+                    clearFocus();
+                    setFocusableInTouchMode(false);
+                    requestLayout();
 
                     if (mToggleListener != null) {
                         mToggleListener.onMenuToggle(false);

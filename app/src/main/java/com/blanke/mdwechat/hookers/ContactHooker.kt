@@ -24,6 +24,9 @@ import com.blanke.mdwechat.ViewTreeRepoThisVersion as VTTV
 
 object ContactHooker : HookerProvider {
     const val keyInit = "key_init"
+    private const val keyContactRoot = "mdwechat_contact_root"
+    private const val keyContactChromeApplied = "mdwechat_contact_chrome_applied"
+    private const val keyContactHeaderStyled = "mdwechat_contact_header_styled"
 
     private fun applyContactPageBackground(view: View) {
         if (HookConfig.is_hook_tab_bg) {
@@ -33,6 +36,59 @@ object ContactHooker : HookerProvider {
         view.background = ColorDrawable(
             ContactPageStyleResolver.resolvePageBackgroundColor(NightModeUtils.isWechatNightMode())
         )
+    }
+
+    private fun resolveContactRoot(recyclerView: ViewGroup): ViewGroup? {
+        (XposedHelpers.getAdditionalInstanceField(recyclerView, keyContactRoot) as? ViewGroup)?.let {
+            return it
+        }
+        val contactView = ViewUtils.getParentViewSafe(recyclerView, 5) as? ViewGroup ?: return null
+        if (!ViewTreeUtils.equals(VTTV.ContactLayoutListenerViewItem.item, contactView)) {
+            return null
+        }
+        XposedHelpers.setAdditionalInstanceField(recyclerView, keyContactRoot, contactView)
+        return contactView
+    }
+
+    private fun applyContactPageChrome(recyclerView: ViewGroup, contactView: ViewGroup) {
+        if (XposedHelpers.getAdditionalInstanceField(recyclerView, keyContactChromeApplied) == true) {
+            return
+        }
+
+        VTTV.ContactLayoutListenerViewItem.treeStacks["backgroundMask"]?.apply {
+            ViewUtils.getChildView1(contactView, this)?.setBackgroundColor(Color.TRANSPARENT)
+        }
+        VTTV.ContactLayoutListenerViewItem.treeStacks["backgroundImage"]?.apply {
+            ViewUtils.getChildView1(contactView, this)?.let {
+                applyContactPageBackground(it)
+            }
+        }
+        recyclerView.background = drawableTransparent
+        ViewUtils.getChildView1(contactView, intArrayOf(0, 1, 0))?.background = drawableTransparent
+        XposedHelpers.setAdditionalInstanceField(recyclerView, keyContactChromeApplied, true)
+    }
+
+    private fun applyContactHeaderStyle(headerView: View, contactView: ViewGroup?) {
+        headerView.background = drawableTransparent
+        if (headerView is ViewGroup) {
+            ListViewHooker.setContactHeaderItemTop(headerView)
+        }
+        ListViewHooker.setContactHeaderItem(headerView)
+        contactView?.let {
+            ViewUtils.getChildView1(it, intArrayOf(0, 1, 0))?.background = drawableTransparent
+        }
+    }
+
+    private fun ensureContactHeaderStyled(headerView: View, contactView: ViewGroup?) {
+        val hasScheduledRetry = XposedHelpers.getAdditionalInstanceField(headerView, keyContactHeaderStyled) == true
+        applyContactHeaderStyle(headerView, contactView)
+        if (hasScheduledRetry) {
+            return
+        }
+        XposedHelpers.setAdditionalInstanceField(headerView, keyContactHeaderStyled, true)
+        headerView.postDelayed({
+            applyContactHeaderStyle(headerView, contactView)
+        }, 160L)
     }
 
 
@@ -54,38 +110,16 @@ object ContactHooker : HookerProvider {
                         return
                     }
 
-                    val contactView = ViewUtils.getParentViewSafe(WxRecyclerView, 5) as ViewGroup
-                    if (!ViewTreeUtils.equals(VTTV.ContactLayoutListenerViewItem.item, contactView)) {
-                        return
-                    }
-                    LogUtil.log("获取联系人界面成功.")
-
-                    //背景
-                    //背景遮罩
-                    VTTV.ContactLayoutListenerViewItem.treeStacks["backgroundMask"]?.apply {
-                        val backgroundITransparent = ViewUtils.getChildView1(contactView, this) as View
-                        backgroundITransparent.setBackgroundColor(Color.TRANSPARENT)
-                    }
-                    //背景
-                    VTTV.ContactLayoutListenerViewItem.treeStacks["backgroundImage"]?.apply {
-                        val backgroundImage = ViewUtils.getChildView1(contactView, this) as View
-                        applyContactPageBackground(backgroundImage)
-                    }
-
+                    val contactView = resolveContactRoot(WxRecyclerView)
+                    contactView ?: return
+                    LogUtil.logOnlyOnce("ContactHooker.ContactRecyclerLayout")
+                    applyContactPageChrome(WxRecyclerView, contactView)
                     LogUtil.logOnlyOnce("ContactFragment Done")
 
-                    //列表第一项(头)
-                    WxRecyclerView.background = drawableTransparent
-
                     VTTV.ContactLayoutListenerViewItem.treeStacks["WxRecyclerView_ContactHeaderItem"]?.apply {
-                        val ContactHeaderItem = ViewUtils.getChildView1(WxRecyclerView, this) as View
-                        ContactHeaderItem.background = drawableTransparent
-
-                        if (ContactHeaderItem is ViewGroup) {
-                            ListViewHooker.setContactHeaderItemTop(ContactHeaderItem)
+                        ViewUtils.getChildView1(WxRecyclerView, this)?.let { contactHeaderItem ->
+                            ensureContactHeaderStyled(contactHeaderItem, contactView)
                         }
-                        ListViewHooker.setContactHeaderItem(ContactHeaderItem)
-                        (ViewUtils.getChildView1(contactView, intArrayOf(0, 1, 0)) as View).background = drawableTransparent
                     }
                 }
             })
@@ -139,12 +173,18 @@ object ContactHooker : HookerProvider {
                     if (view !is ViewGroup) {
                         return
                     }
-                    ListViewHooker.resetRecycledMainPageRippleState(view)
-                    ListViewHooker.prepareReusableItemView(view)
+                    val recyclerView = param.thisObject as? ViewGroup ?: return
+                    val contactView = resolveContactRoot(recyclerView)
+                    contactView ?: return
+                    val isHeader = ViewTreeUtils.equals(VTTV.ContactHeaderItem.item, view)
+                    if (isHeader) {
+                        ensureContactHeaderStyled(view, contactView)
+                        return
+                    }
                     // 联系人列表
-                    if (ViewTreeUtils.equals(VTTV.ContactListViewItem.item, view)
-                        || ListViewHooker.isContactRecyclerRowView(view)
-                    ) {
+                    val isContactRow = ViewTreeUtils.equals(VTTV.ContactListViewItem.item, view)
+                            || ListViewHooker.isContactRecyclerRowView(view)
+                    if (isContactRow) {
                         ListViewHooker.setContactListViewItem(view)
                     }
                 }

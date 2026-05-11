@@ -58,11 +58,18 @@ object ListViewHooker : HookerProvider {
     private const val keyMainPageListInteraction = "mdwechat_main_page_list_interaction"
     private const val keyMainPageListResetRunnable = "mdwechat_main_page_list_reset_runnable"
     private const val keyContactHeaderIconCircleApplied = "mdwechat_contact_header_icon_circle_applied"
+    private const val keyContactRecyclerRow = "mdwechat_contact_recycler_row"
+    private const val keyContactContainerViews = "mdwechat_contact_container_views"
+    private const val keyContactRowViews = "mdwechat_contact_row_views"
+    private const val keyContactPageItemRipple = "mdwechat_contact_page_item_ripple"
     private const val absListViewTouchModeRest = -1
     private const val absListViewInvalidPosition = -1
     private val conversationPressedState = intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed)
     private val conversationEnabledState = intArrayOf(android.R.attr.state_enabled)
     private val contactHeaderIconContainerNames = setOf("ajy", "n8", "g9q")
+    private val contactRecyclerRowMarkers = setOf("cg5", "kbo", "kbq")
+    private val contactIndexedTextNames = setOf("kbq", "cfx")
+    private val emptyDrawableState = intArrayOf()
     private val modernChatBubbleRowSignals = setOf(
         "bkl",
         "brp",
@@ -73,6 +80,16 @@ object ListViewHooker : HookerProvider {
         "bjr",
         "bjs",
         "biq"
+    )
+
+    private data class ContactRowViews(
+            val headerView: View?,
+            val innerView: View?,
+            val titleView: View?,
+            val titleView80: View?,
+            val headTextView: TextView?,
+            val indexedTitleTextView: TextView?,
+            val indexedSummaryTextView: TextView?
     )
 
     private val titleTextColor: Int
@@ -211,14 +228,36 @@ object ListViewHooker : HookerProvider {
 
     private fun applyContactPageItemRipple(view: View) {
         applyContactPageItemSurface(view)
+        val cachedRipple = XposedHelpers.getAdditionalInstanceField(view, keyContactPageItemRipple) as? Drawable
+        if (cachedRipple != null && HookConfig.is_hook_ripple) {
+            cachedRipple.state = emptyDrawableState
+            cachedRipple.jumpToCurrentState()
+            view.background = cachedRipple
+            SettingsHooker.refreshSettingsStatusOverlayFromListChild(view)
+            return
+        }
         applyMainPageItemRipple(view)
+        if (HookConfig.is_hook_ripple) {
+            view.background?.let {
+                XposedHelpers.setAdditionalInstanceField(view, keyContactPageItemRipple, it)
+            }
+        } else {
+            XposedHelpers.removeAdditionalInstanceField(view, keyContactPageItemRipple)
+        }
     }
 
     fun isContactRecyclerRowView(view: View): Boolean {
         if (view !is ViewGroup) {
             return false
         }
-        return ContactPageStyleResolver.shouldStyleIndexedContactRow(collectViewResourceNames(view))
+        (XposedHelpers.getAdditionalInstanceField(view, keyContactRecyclerRow) as? Boolean)?.let {
+            return it
+        }
+        val isRow = ContactPageStyleResolver.shouldStyleIndexedContactRow(
+                collectRequiredViewResourceNames(view, contactRecyclerRowMarkers)
+        )
+        XposedHelpers.setAdditionalInstanceField(view, keyContactRecyclerRow, isRow)
+        return isRow
     }
 
     private fun collectViewResourceNames(root: View, collector: MutableSet<String> = mutableSetOf()): Set<String> {
@@ -226,6 +265,30 @@ object ListViewHooker : HookerProvider {
         if (root is ViewGroup) {
             for (i in 0 until root.childCount) {
                 collectViewResourceNames(root.getChildAt(i), collector)
+            }
+        }
+        return collector
+    }
+
+    private fun collectRequiredViewResourceNames(
+            root: View,
+            requiredNames: Set<String>,
+            collector: MutableSet<String> = mutableSetOf()
+    ): Set<String> {
+        getViewResourceName(root)?.let {
+            if (it in requiredNames) {
+                collector.add(it)
+                if (collector.size == requiredNames.size) {
+                    return collector
+                }
+            }
+        }
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                collectRequiredViewResourceNames(root.getChildAt(i), requiredNames, collector)
+                if (collector.size == requiredNames.size) {
+                    return collector
+                }
             }
         }
         return collector
@@ -262,12 +325,29 @@ object ListViewHooker : HookerProvider {
     }
 
     private fun clearContactPageContainerBackgrounds(root: View) {
+        for (container in getContactContainerViews(root)) {
+            container.background = drawableTransparent
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun getContactContainerViews(root: View): List<ViewGroup> {
+        (XposedHelpers.getAdditionalInstanceField(root, keyContactContainerViews) as? List<ViewGroup>)?.let { cached ->
+            return cached
+        }
+        val containers = mutableListOf<ViewGroup>()
+        collectContactContainerViews(root, containers)
+        XposedHelpers.setAdditionalInstanceField(root, keyContactContainerViews, containers)
+        return containers
+    }
+
+    private fun collectContactContainerViews(root: View, collector: MutableList<ViewGroup>) {
         if (root !is ViewGroup) {
             return
         }
-        root.background = drawableTransparent
+        collector.add(root)
         for (i in 0 until root.childCount) {
-            clearContactPageContainerBackgrounds(root.getChildAt(i))
+            collectContactContainerViews(root.getChildAt(i), collector)
         }
     }
 
@@ -284,6 +364,53 @@ object ListViewHooker : HookerProvider {
             }
         }
         return null
+    }
+
+    private fun findDescendantViewsByResourceName(root: View, resourceNames: Set<String>): Map<String, View> {
+        val matches = mutableMapOf<String, View>()
+        collectDescendantViewsByResourceName(root, resourceNames, matches)
+        return matches
+    }
+
+    private fun collectDescendantViewsByResourceName(
+            root: View,
+            resourceNames: Set<String>,
+            matches: MutableMap<String, View>
+    ) {
+        getViewResourceName(root)?.let {
+            if (it in resourceNames && it !in matches) {
+                matches[it] = root
+                if (matches.size == resourceNames.size) {
+                    return
+                }
+            }
+        }
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                collectDescendantViewsByResourceName(root.getChildAt(i), resourceNames, matches)
+                if (matches.size == resourceNames.size) {
+                    return
+                }
+            }
+        }
+    }
+
+    private fun getContactRowViews(view: View): ContactRowViews {
+        (XposedHelpers.getAdditionalInstanceField(view, keyContactRowViews) as? ContactRowViews)?.let {
+            return it
+        }
+        val namedViews = findDescendantViewsByResourceName(view, contactIndexedTextNames)
+        val rowViews = ContactRowViews(
+                headerView = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["headerView"]),
+                innerView = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["innerView"]),
+                titleView = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["titleView"]),
+                titleView80 = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["titleView_8_0"]),
+                headTextView = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["headTextView"]) as? TextView,
+                indexedTitleTextView = namedViews["kbq"] as? TextView,
+                indexedSummaryTextView = namedViews["cfx"] as? TextView
+        )
+        XposedHelpers.setAdditionalInstanceField(view, keyContactRowViews, rowViews)
+        return rowViews
     }
 
     private fun getViewResourceName(view: View): String? {
@@ -2047,32 +2174,26 @@ object ListViewHooker : HookerProvider {
     // 8.0.14 之后联系人列表从 LinearLayout 变为 NoDrawingCacheLinearLayout, 8.0.24 之后又变回去了 (?)
     fun setContactListViewItem(view: View) {
         LogUtil.logOnlyOnce("ListViewHooker.ContactListViewItem")
+        val rowViews = getContactRowViews(view)
         applyContactPageItemSurface(view)
         clearContactPageContainerBackgrounds(view)
         // 标题下面的线
-        if (VTTV.ContactListViewItem.treeStacks["headerView"] != null) {
-            ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["headerView"])
-                    ?.background = drawableTransparent
-        }
+        rowViews.headerView?.background = drawableTransparent
         //内容下面的线 innerView
-        ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["innerView"])
-                ?.background = drawableTransparent
+        rowViews.innerView?.background = drawableTransparent
 
-        val titleView = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["titleView"])
-        titleView?.background = drawableTransparent
-        val titleView80 = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["titleView_8_0"])
-        titleView80?.background = drawableTransparent
+        rowViews.titleView?.background = drawableTransparent
+        rowViews.titleView80?.background = drawableTransparent
 //        titleView80?.apply{
 //            LogUtil.logView(this)}
         if (isHookTextColor) {
-            val headTextView = ViewUtils.getChildView1(view, VTTV.ContactListViewItem.treeStacks["headTextView"]) as? TextView
-            headTextView?.setTextColor(summaryTextColor)
-            titleView?.apply { XposedHelpers.callMethod(this, "setNickNameTextColor", ColorStateList.valueOf(titleTextColor)) }
-            titleView80?.apply {
-                XposedHelpers.callMethod(titleView80, "setTextColor", titleTextColor)
+            rowViews.headTextView?.setTextColor(summaryTextColor)
+            rowViews.titleView?.apply { XposedHelpers.callMethod(this, "setNickNameTextColor", ColorStateList.valueOf(titleTextColor)) }
+            rowViews.titleView80?.apply {
+                XposedHelpers.callMethod(this, "setTextColor", titleTextColor)
             }
-            (findDescendantViewByResourceName(view, "kbq") as? TextView)?.setTextColor(titleTextColor)
-            (findDescendantViewByResourceName(view, "cfx") as? TextView)?.setTextColor(summaryTextColor)
+            rowViews.indexedTitleTextView?.setTextColor(titleTextColor)
+            rowViews.indexedSummaryTextView?.setTextColor(summaryTextColor)
         }
         applyContactPageItemRipple(view)
     }
