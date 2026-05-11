@@ -156,7 +156,7 @@
         <div class="bg-[#FCFDF6]/90 backdrop-blur-md z-10 sticky top-0 px-4 py-3 flex items-center justify-between border-b border-gray-200">
             <div class="flex items-center gap-2">
                 <svg class="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
-                <span class="text-lg font-medium text-gray-900">+27母上</span>
+                <span class="text-lg font-medium text-gray-900">示例联系人</span>
             </div>
             <svg class="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z"></path></svg>
         </div>
