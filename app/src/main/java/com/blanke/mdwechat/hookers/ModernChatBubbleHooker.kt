@@ -37,7 +37,7 @@ object ModernChatBubbleHooker : HookerProvider {
     private const val keyLastDrawSignature = "mdwechat_modern_chat_bubble_last_draw_signature"
     private const val bubbleProbeFile = "chat_bubble_probe.txt"
     private const val enableDrawApply = false
-    private const val enableVisibleWindowApply = false
+    private const val enableVisibleWindowApply = true
 
     override fun provideStaticHookers(): List<Hooker>? {
         if (!enableModernChatBubble) {
