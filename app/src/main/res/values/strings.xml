@@ -104,6 +104,9 @@
     <string name="key_hook_float_button_color_is_secondary">key_hook_float_button_color_is_secondary</string>
     <string name="text_hook_float_button_color_is_secondary">是否使用副色1作为文字颜色</string>
     <string name="summary_hook_float_button_color_is_secondary">关闭则使用副色2.</string>
+    <string name="key_hook_float_button_rounded_rect">key_hook_float_button_rounded_rect</string>
+    <string name="text_hook_float_button_rounded_rect">悬浮按钮圆角矩形</string>
+    <string name="summary_hook_float_button_rounded_rect">使用 MD3 圆角矩形外形，颜色和图标设置保持不变。</string>
     <string name="key_hook_float_button_angle">key_hook_float_button_angle</string>
     <string name="text_hook_float_button_angle">悬浮按钮旋转角度</string>
     <string name="summary_hook_float_button_angle">调整点击悬浮按钮之后主按钮的旋转角度.</string>
@@ -191,6 +194,9 @@
     <string name="key_hook_tab_bar">key_hook_tab_bar</string>
     <string name="text_hook_tab_bar">TabLayout横杠</string>
     <string name="summary_hook_tab_bar">TabLayout当前页的横杠</string>
+    <string name="key_hook_tab_floating_bar">key_hook_tab_floating_bar</string>
+    <string name="text_hook_tab_floating_bar">TabLayout悬浮底栏</string>
+    <string name="summary_hook_tab_floating_bar">仅调整底部 TabLayout 外层为悬浮胶囊，颜色、图标和切换动画保持原设置。</string>
     <string name="key_hook_tab_pill">key_hook_tab_pill</string>
     <string name="text_hook_tab_pill">TabLayout胶囊背景</string>
     <string name="summary_hook_tab_pill">TabLayout当前页的胶囊背景</string>

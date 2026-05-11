@@ -22,6 +22,7 @@ import android.graphics.drawable.RippleDrawable;
 import android.graphics.drawable.ShapeDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.graphics.drawable.shapes.OvalShape;
+import android.graphics.drawable.shapes.RoundRectShape;
 import android.graphics.drawable.shapes.Shape;
 import android.os.Build;
 import android.os.Parcel;
@@ -74,6 +75,8 @@ public class FloatingActionButton extends ImageButton {
     private Drawable mBackgroundDrawable;
     private boolean mUsingElevation;
     private boolean mUsingElevationCompat;
+    private boolean mUseRoundedRectangleShape;
+    private float mRoundedRectangleCornerRadius = Util.dpToPx(getContext(), 16f);
 
     // Progress
     private boolean mProgressBarEnabled;
@@ -415,9 +418,9 @@ public class FloatingActionButton extends ImageButton {
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private Drawable createFillDrawable() {
         StateListDrawable drawable = new StateListDrawable();
-        drawable.addState(new int[]{-android.R.attr.state_enabled}, createCircleDrawable(mColorDisabled));
-        drawable.addState(new int[]{android.R.attr.state_pressed}, createCircleDrawable(mColorPressed));
-        drawable.addState(new int[]{}, createCircleDrawable(mColorNormal));
+        drawable.addState(new int[]{-android.R.attr.state_enabled}, createShapeDrawable(mColorDisabled));
+        drawable.addState(new int[]{android.R.attr.state_pressed}, createShapeDrawable(mColorPressed));
+        drawable.addState(new int[]{}, createShapeDrawable(mColorNormal));
 
         if (Util.hasLollipop()) {
             RippleDrawable ripple = new RippleDrawable(new ColorStateList(new int[][]{{}},
@@ -425,7 +428,17 @@ public class FloatingActionButton extends ImageButton {
             setOutlineProvider(new ViewOutlineProvider() {
                 @Override
                 public void getOutline(View view, Outline outline) {
-                    outline.setOval(0, 0, view.getWidth(), view.getHeight());
+                    if (mUseRoundedRectangleShape) {
+                        outline.setRoundRect(
+                                0,
+                                0,
+                                view.getWidth(),
+                                view.getHeight(),
+                                getSafeRoundedRectangleCornerRadius()
+                        );
+                    } else {
+                        outline.setOval(0, 0, view.getWidth(), view.getHeight());
+                    }
                 }
             });
             setClipToOutline(true);
@@ -437,10 +450,27 @@ public class FloatingActionButton extends ImageButton {
         return drawable;
     }
 
-    private Drawable createCircleDrawable(int color) {
-        CircleDrawable shapeDrawable = new CircleDrawable(new OvalShape());
+    private Drawable createShapeDrawable(int color) {
+        Shape shape = mUseRoundedRectangleShape
+                ? new RoundRectShape(createRoundedRectangleRadii(), null, null)
+                : new OvalShape();
+        CircleDrawable shapeDrawable = new CircleDrawable(shape);
         shapeDrawable.getPaint().setColor(color);
         return shapeDrawable;
+    }
+
+    private float[] createRoundedRectangleRadii() {
+        float radius = getSafeRoundedRectangleCornerRadius();
+        return new float[]{
+                radius, radius,
+                radius, radius,
+                radius, radius,
+                radius, radius
+        };
+    }
+
+    private float getSafeRoundedRectangleCornerRadius() {
+        return Math.max(0f, mRoundedRectangleCornerRadius);
     }
 
     @SuppressWarnings("deprecation")
@@ -786,8 +816,20 @@ public class FloatingActionButton extends ImageButton {
 
         @Override
         public void draw(Canvas canvas) {
-            canvas.drawCircle(calculateCenterX(), calculateCenterY(), mRadius, mPaint);
-            canvas.drawCircle(calculateCenterX(), calculateCenterY(), mRadius, mErase);
+            if (mUseRoundedRectangleShape) {
+                RectF rect = new RectF(
+                        calculateCenterX() - mRadius,
+                        calculateCenterY() - mRadius,
+                        calculateCenterX() + mRadius,
+                        calculateCenterY() + mRadius
+                );
+                float radius = Math.min(getSafeRoundedRectangleCornerRadius(), mRadius);
+                canvas.drawRoundRect(rect, radius, radius, mPaint);
+                canvas.drawRoundRect(rect, radius, radius, mErase);
+            } else {
+                canvas.drawCircle(calculateCenterX(), calculateCenterY(), mRadius, mPaint);
+                canvas.drawCircle(calculateCenterX(), calculateCenterY(), mRadius, mErase);
+            }
         }
 
         @Override
@@ -930,6 +972,20 @@ public class FloatingActionButton extends ImageButton {
 
     public int getButtonSize() {
         return mFabSize;
+    }
+
+    public void setRoundedRectangleShape(boolean useRoundedRectangleShape, float cornerRadius) {
+        float safeCornerRadius = Math.max(0f, cornerRadius);
+        if (mUseRoundedRectangleShape != useRoundedRectangleShape
+                || mRoundedRectangleCornerRadius != safeCornerRadius) {
+            mUseRoundedRectangleShape = useRoundedRectangleShape;
+            mRoundedRectangleCornerRadius = safeCornerRadius;
+            updateBackground();
+        }
+    }
+
+    public boolean isRoundedRectangleShape() {
+        return mUseRoundedRectangleShape;
     }
 
     public void setColorNormal(int color) {

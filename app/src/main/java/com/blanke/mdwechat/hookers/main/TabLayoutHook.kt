@@ -3,12 +3,15 @@ package com.blanke.mdwechat.hookers.main
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Outline
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.blanke.mdwechat.Methods
@@ -23,6 +26,7 @@ import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.MaterialTabCustomIconPolicy
 import com.blanke.mdwechat.util.MaterialTabIconTransitionPolicy
 import com.blanke.mdwechat.util.MaterialTabIconTintPolicy
+import com.blanke.mdwechat.util.MaterialTabFloatingBarPolicy
 import com.blanke.mdwechat.util.ModuleContextCompat
 import com.blanke.mdwechat.util.NightModeUtils
 import com.blanke.mdwechat.util.RippleColorResolver
@@ -309,35 +313,166 @@ object TabLayoutHook {
         }
     }
 
-    fun addTabLayoutAtBottom(tabView: ViewGroup, height: Int) {
+    private fun configureBottomTabFrame(
+        tabView: ViewGroup,
+        viewChild: ViewGroup,
+        overlayParent: ViewGroup,
+        tabLayout: MdMaterialTabLayout,
+        params: FrameLayout.LayoutParams,
+        nativeHeight: Int
+    ) {
+        val isFloating = HookConfig.is_hook_tab_floating_bar && overlayParent is FrameLayout
+        if (!isFloating) {
+            params.height = nativeHeight
+            return
+        }
+
+        val context = tabView.context
+        val horizontalMargin = ConvertUtils.dp2px(
+            context,
+            MaterialTabFloatingBarPolicy.horizontalMarginDp(isFloating = true)
+        )
+        params.height = ConvertUtils.dp2px(
+            context,
+            MaterialTabFloatingBarPolicy.heightDp(isFloating = true, nativeHeightDp = 0f)
+        )
+        params.leftMargin = horizontalMargin
+        params.rightMargin = horizontalMargin
+        params.bottomMargin = ConvertUtils.dp2px(
+            context,
+            MaterialTabFloatingBarPolicy.bottomMarginDp(isFloating = true)
+        )
+        params.gravity = Gravity.BOTTOM
+
+        tabView.clipChildren = false
+        tabView.clipToPadding = false
+        viewChild.clipChildren = false
+        viewChild.clipToPadding = false
+        overlayParent.clipChildren = false
+        overlayParent.clipToPadding = false
+        disableAncestorClipping(tabView)
+
+        val radiusPx = ConvertUtils.dp2px(
+            context,
+            MaterialTabFloatingBarPolicy.cornerRadiusDp(isFloating = true)
+        ).toFloat()
+        tabLayout.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(MaterialTabFloatingBarPolicy.surfaceColor)
+            cornerRadius = radiusPx
+            val strokeWidth = ConvertUtils.dp2px(context, MaterialTabFloatingBarPolicy.strokeWidthDp)
+            if (strokeWidth > 0) {
+                setStroke(strokeWidth, Color.TRANSPARENT)
+            }
+        }
+        tabLayout.elevation = ConvertUtils.dp2px(context, 10f).toFloat()
+        clipFloatingBar(tabLayout, radiusPx)
+    }
+
+    private fun disableAncestorClipping(start: View) {
+        var parent = start.parent as? ViewGroup
+        repeat(3) {
+            val current = parent ?: return
+            current.clipChildren = false
+            current.clipToPadding = false
+            parent = current.parent as? ViewGroup
+        }
+    }
+
+    private fun clipFloatingBar(tabLayout: MdMaterialTabLayout, radiusPx: Float) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return
+        }
+        tabLayout.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, radiusPx)
+            }
+        }
+        tabLayout.clipToOutline = true
+    }
+
+    private fun collapseNativeBottomTabSpace(
+        tabView: ViewGroup,
+        viewChild: ViewGroup,
+        nativeHeight: Int
+    ) {
+        val context = tabView.context
+        val nativeHeightDp = ConvertUtils.px2dp(context, nativeHeight.toFloat()).toFloat()
+        val reservedHeight = ConvertUtils.dp2px(
+            context,
+            MaterialTabFloatingBarPolicy.reservedNativeBottomTabHeightDp(
+                isFloating = true,
+                nativeHeightDp = nativeHeightDp
+            )
+        )
+        listOf(tabView, viewChild).forEach { view ->
+            view.background = ColorDrawable(Color.TRANSPARENT)
+            view.minimumHeight = 0
+            view.setPadding(0, 0, 0, 0)
+            view.layoutParams?.let { params ->
+                params.height = reservedHeight
+                view.layoutParams = params
+            }
+            view.requestLayout()
+            view.invalidate()
+        }
+    }
+
+    private fun hideNativeBottomTabChildren(viewChild: ViewGroup) {
+        val lastIndex = minOf(3, viewChild.childCount - 1)
+        if (lastIndex < 0) {
+            return
+        }
+        for (index in 0..lastIndex) {
+            viewChild.getChildAt(index).visibility = View.GONE
+        }
+    }
+
+    fun addTabLayoutAtBottom(tabView: ViewGroup, overlayParent: ViewGroup, height: Int) {
         RuntimeProbe.append(tabView.context, "TabLayout bottom start height=$height")
         val tabLayout = newTabLayout(tabView, Gravity.TOP, 5f)
+        val isFloating = HookConfig.is_hook_tab_floating_bar && overlayParent is FrameLayout
 
         val params = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         val viewChild = tabView.getChildAt(0) as ViewGroup
-        params.height = height
+        configureBottomTabFrame(tabView, viewChild, overlayParent, tabLayout, params, height)
+        if (isFloating) {
+            collapseNativeBottomTabSpace(tabView, viewChild, height)
+        }
         mainThread {
             Objects.Main.tabLayout = tabLayout
-            tabLayout.background = NightModeUtils.getForegroundDrawable(
-                tabLayout.resources,
-                BackgroundImageHook.getTabLayoutBitmapAtBottom(params.height, 0)
-            )
+            if (!isFloating) {
+                tabLayout.background = NightModeUtils.getForegroundDrawable(
+                    tabLayout.resources,
+                    BackgroundImageHook.getTabLayoutBitmapAtBottom(params.height, 0)
+                )
+            }
         }
-        viewChild.addView(tabLayout, 4, params)
+        if (isFloating) {
+            overlayParent.addView(tabLayout, params)
+        } else {
+            viewChild.addView(tabLayout, 4, params)
+        }
         tabLayout.bringToFront()
-        viewChild.requestLayout()
-        viewChild.invalidate()
+        val attachedParent = if (isFloating) overlayParent else viewChild
+        attachedParent.requestLayout()
+        attachedParent.invalidate()
         try {
             Objects.Main.LauncherUI_mTabLayout = tabLayout
             LogUtil.log("add table layout success")
-            for (index in 0..3) {
-                viewChild.getChildAt(index).visibility = View.GONE
-            }
-            RuntimeProbe.append(tabView.context, "TabLayout bottom addViewDone")
+            hideNativeBottomTabChildren(viewChild)
+            RuntimeProbe.append(
+                tabView.context,
+                "TabLayout bottom addViewDone floating=$isFloating parent=${attachedParent.javaClass.name}"
+            )
         } catch (e: Exception) {
             LogUtil.log(e)
             RuntimeProbe.append(tabView.context, "TabLayout bottom failed ${e.javaClass.name}:${e.message}")
         }
+    }
+
+    fun addTabLayoutAtBottom(tabView: ViewGroup, height: Int) {
+        addTabLayoutAtBottom(tabView, tabView, height)
     }
 
     fun addTabLayout(viewPagerLinearLayout: ViewGroup) {

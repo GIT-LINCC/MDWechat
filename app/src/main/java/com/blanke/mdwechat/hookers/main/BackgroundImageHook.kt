@@ -76,7 +76,9 @@ object BackgroundImageHook {
             }
             //下方
             else {
-                if (page == 3 && WechatGlobal.wxVersion!! >= Version("8.0.0") && HookConfig.is_settings_page_transparent) {
+                if (HookConfig.is_hook_tab_floating_bar) {
+                    return
+                } else if (page == 3 && WechatGlobal.wxVersion!! >= Version("8.0.0") && HookConfig.is_settings_page_transparent) {
 
 //                    if (NightModeUtils.isWechatNightMode()) {
 ////                        Objects.Main.tabLayout?.background = ColorDrawable(WeChatHelper.colorDarkPrimary)

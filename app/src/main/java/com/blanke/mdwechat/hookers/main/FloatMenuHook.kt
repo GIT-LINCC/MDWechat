@@ -20,6 +20,7 @@ import com.blanke.mdwechat.util.ConvertUtils
 import com.blanke.mdwechat.util.DrawableUtils
 import com.blanke.mdwechat.util.LogUtil
 import com.blanke.mdwechat.util.LogUtil.log
+import com.blanke.mdwechat.util.MaterialFloatButtonShapePolicy
 import com.blanke.mdwechat.util.ModuleContextCompat
 import com.blanke.mdwechat.util.NightModeUtils
 import com.blanke.mdwechat.util.RuntimeProbe
@@ -70,6 +71,7 @@ object FloatMenuHook {
         drawable = if (HookConfig.is_hook_float_button_color_up) DrawableUtils.setDrawableColor(drawable, floatButtonColor) else drawable
         actionMenu.setMenuIcon(drawable)
         actionMenu.initMenuButton()
+        applyFloatButtonShape(actionMenu.menuButton, context)
         actionMenu.menuButton.contentDescription = "MDWECHAT_FLOAT_MENU_BUTTON"
         actionMenu.menuButton.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
 
@@ -206,11 +208,20 @@ object FloatMenuHook {
         fab.colorNormal = primaryColor
         fab.colorPressed = primaryColor
         fab.buttonSize = SIZE_MINI
+        applyFloatButtonShape(fab, context)
         fab.labelText = label
 //        fab.setLabelTextColor(floatButtonColor)
         actionMenu.addMenuButton(fab)
         fab.setLabelColors(primaryColor, primaryColor, primaryColor)
         return fab
+    }
+
+    private fun applyFloatButtonShape(fab: FloatingActionButton, context: Context) {
+        val radius = ConvertUtils.dp2px(
+            context,
+            MaterialFloatButtonShapePolicy.roundedRectangleCornerRadiusDp
+        ).toFloat()
+        fab.setRoundedRectangleShape(HookConfig.is_hook_float_button_rounded_rect, radius)
     }
 
     private fun fallbackMenuDrawable(context: Context): Drawable {

@@ -27,7 +27,9 @@ import com.blanke.mdwechat.hookers.main.BackgroundImageHook
 import com.blanke.mdwechat.hookers.main.FloatMenuHook
 import com.blanke.mdwechat.hookers.main.HomeActionBarHook
 import com.blanke.mdwechat.hookers.main.TabLayoutHook
+import com.blanke.mdwechat.util.ConvertUtils
 import com.blanke.mdwechat.util.LogUtil
+import com.blanke.mdwechat.util.MaterialTabFloatingBarPolicy
 import com.blanke.mdwechat.util.RuntimeProbe
 import com.blanke.mdwechat.util.TabLayoutIndicatorPolicy
 import com.blanke.mdwechat.util.ViewUtils
@@ -175,12 +177,20 @@ object LauncherUIHooker : HookerProvider {
             val is_hook_tab = !HookConfig.is_key_hide_tab && HookConfig.is_hook_tab
             val isTabLayoutOnBottom = is_hook_tab && !HookConfig.is_tab_layout_on_top
             val isTabLayoutOnTop = is_hook_tab && HookConfig.is_tab_layout_on_top
+            val isFloatingBottomTab = isTabLayoutOnBottom && HookConfig.is_hook_tab_floating_bar
             val isKeyHideTab = isTabLayoutOnTop || (!is_hook_tab && HookConfig.is_key_hide_tab)
             val shouldFix = isTabLayoutOnTop || HookConfig.is_hook_hide_actionbar
-            val floatButtonMarginBottom = if (isTabLayoutOnBottom || (!isKeyHideTab)) 1 else 0
 
             val tabView = linearViewGroup.getChildAt(1) as ViewGroup
             val tabViewUnderneathHeight = measureHeight(tabView)
+            val floatButtonMarginBottom = when {
+                isFloatingBottomTab -> ConvertUtils.dp2px(
+                    activity,
+                    MaterialTabFloatingBarPolicy.floatMenuExtraBottomMarginDp(isFloating = true)
+                )
+                isTabLayoutOnBottom || (!isKeyHideTab) -> tabViewUnderneathHeight
+                else -> 0
+            }
             if (BackgroundImageHook._tabLayoutHeightOnBottom < 0)
                 BackgroundImageHook._tabLayoutHeightOnBottom = tabViewUnderneathHeight
 
@@ -225,7 +235,12 @@ object LauncherUIHooker : HookerProvider {
                 isTabLayoutOnBottom -> {
                     try {
                         LogUtil.log("添加底栏")
-                        TabLayoutHook.addTabLayoutAtBottom(tabView, tabViewUnderneathHeight)
+                        val tabOverlayParent = if (HookConfig.is_hook_tab_floating_bar) {
+                            activity.findViewById<ViewGroup>(android.R.id.content) ?: contentViewGroup
+                        } else {
+                            contentViewGroup
+                        }
+                        TabLayoutHook.addTabLayoutAtBottom(tabView, tabOverlayParent, tabViewUnderneathHeight)
                         LogUtil.log("添加底栏成功")
                         RuntimeProbe.append(activity, "$source bottomTabAdded")
                     } catch (e: Throwable) {
@@ -245,7 +260,7 @@ object LauncherUIHooker : HookerProvider {
             }
             LogUtil.log("fix completed")
 
-            lastFloatMenuBottomMargin = floatButtonMarginBottom * tabViewUnderneathHeight
+            lastFloatMenuBottomMargin = floatButtonMarginBottom
             ensureFloatMenu(activity, lastFloatMenuBottomMargin, source)
             XposedHelpers.setAdditionalInstanceField(activity, keyInit, true)
             LogUtil.log("LaunchUI Hook Completed.")

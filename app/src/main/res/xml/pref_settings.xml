@@ -502,6 +502,12 @@
                 android:dependency="@string/key_hook_float_button"
                 android:key="@string/key_hook_float_button_color_up"
                 android:title="@string/text_hook_float_button_color_up" />
+            <SwitchPreference
+                android:defaultValue="false"
+                android:dependency="@string/key_hook_float_button"
+                android:key="@string/key_hook_float_button_rounded_rect"
+                android:summary="@string/summary_hook_float_button_rounded_rect"
+                android:title="@string/text_hook_float_button_rounded_rect" />
             <EditTextPreference
                 android:defaultValue="-90"
                 android:dependency="@string/key_hook_float_button"
@@ -602,6 +608,12 @@
                 android:key="@string/key_hook_tab_bar"
                 android:summary="@string/summary_hook_tab_bar"
                 android:title="@string/text_hook_tab_bar" />
+            <SwitchPreference
+                android:defaultValue="false"
+                android:dependency="@string/key_hook_tab"
+                android:key="@string/key_hook_tab_floating_bar"
+                android:summary="@string/summary_hook_tab_floating_bar"
+                android:title="@string/text_hook_tab_floating_bar" />
             <SwitchPreference
                 android:defaultValue="false"
                 android:dependency="@string/key_hook_tab_bar"

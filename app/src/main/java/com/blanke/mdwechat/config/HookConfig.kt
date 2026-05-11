@@ -39,6 +39,7 @@ object HookConfig {
     private val key_hook_float_button_angle = "key_hook_float_button_angle"
     private val key_hook_float_button_color_up = "key_hook_float_button_color_up"
     private val key_hook_float_button_color_is_secondary = "key_hook_float_button_color_is_secondary"
+    private val key_hook_float_button_rounded_rect = "key_hook_float_button_rounded_rect"
     private val key_hook_search = "key_hook_search"
     private val key_hook_tab_bg = "key_hook_tab_bg"
     private val key_chat_bg_mode = "key_chat_bg_mode"
@@ -60,6 +61,7 @@ object HookConfig {
     private val key_hook_tab_pill_color_custom = "key_hook_tab_pill_color_custom"
     private val key_hook_tab_pill_color = "key_hook_tab_pill_color"
     private val key_hook_tab_bar = "key_hook_tab_bar"
+    private val key_hook_tab_floating_bar = "key_hook_tab_floating_bar"
     private val key_small_tab_bar_size = "key_small_tab_bar_size"
     private val key_hook_menu_game = "key_hook_menu_game"
     private val key_hook_menu_shop = "key_hook_menu_shop"
@@ -235,6 +237,10 @@ object HookConfig {
         get() {
             return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_float_button_color_up, true)
         }
+    val is_hook_float_button_rounded_rect: Boolean
+        get() {
+            return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_float_button_rounded_rect, false)
+        }
 
 
     val is_hook_search: Boolean
@@ -305,6 +311,10 @@ object HookConfig {
     val is_hook_tab_bar: Boolean
         get() {
             return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_tab_bar, true)
+        }
+    val is_hook_tab_floating_bar: Boolean
+        get() {
+            return WeChatHelper.XMOD_PREFS.getBoolean(key_hook_tab_floating_bar, false)
         }
     val is_small_tab_bar_size: Boolean
         get() {
